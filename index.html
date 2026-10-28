@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Great British Grind</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%2307070d'/><rect x='3' y='3' width='10' height='10' fill='%2300f0ff'/><rect x='6' y='6' width='4' height='4' fill='%23ff2bd6'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="top">
+    <div class="brand">
+      <h1 id="title">THE GREAT BRITISH GRIND</h1>
+      <p class="sub" id="routeName"></p>
+    </div>
+    <div class="top-actions">
+      <span id="mode" class="pill">CONNECTING…</span>
+      <button id="unitBtn" class="btn ghost" type="button" title="Toggle units">MI</button>
+      <button id="squadBtn" class="btn ghost" type="button">EDIT SQUAD</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel area-board">
+      <div class="panel-head">
+        <h2>LEADERBOARD</h2>
+        <span class="squad-total" id="squadTotal"></span>
+      </div>
+      <ol id="board" class="board"></ol>
+    </section>
+
+    <section class="panel area-map">
+      <div class="panel-head"><h2>WORLD MAP</h2><span class="hint">▲ NORTH</span></div>
+      <div id="track" class="track"></div>
+    </section>
+
+    <section class="panel area-log">
+      <div class="panel-head"><h2>LOG A QUEST</h2></div>
+      <form id="logForm" autocomplete="off">
+        <label class="field"><span>PLAYER</span><select id="fPlayer" required></select></label>
+        <div class="field"><span>CLASS</span><div class="types" id="fTypes"></div></div>
+        <div class="row">
+          <label class="field grow"><span>DISTANCE</span>
+            <input id="fDist" type="number" step="0.01" min="0.01" max="1000" inputmode="decimal" placeholder="5.0" required>
+          </label>
+          <label class="field"><span>UNIT</span>
+            <select id="fUnit"><option value="km">KM</option><option value="mi">MI</option></select>
+          </label>
+        </div>
+        <div class="row">
+          <label class="field grow"><span>DATE</span><input id="fDate" type="date" required></label>
+        </div>
+        <label class="field"><span>NOTE <em>(OPTIONAL)</em></span><input id="fNote" maxlength="80" placeholder="Absolutely brutal hills"></label>
+        <p class="preview" id="preview"></p>
+        <button class="btn primary big" type="submit">▶ SUBMIT</button>
+      </form>
+      <div class="rules" id="rules"></div>
+    </section>
+
+    <section class="panel area-feed">
+      <div class="panel-head"><h2>BATTLE LOG</h2></div>
+      <ul id="feed" class="feed"></ul>
+    </section>
+  </main>
+
+  <dialog id="squadDlg" class="dlg">
+    <form method="dialog" class="dlg-inner" id="squadForm">
+      <div class="panel-head"><h2>EDIT SQUAD</h2><button class="btn ghost" value="cancel" type="submit">✕</button></div>
+      <div id="squadCards" class="squad-cards"></div>
+      <div class="dlg-actions">
+        <button class="btn ghost" value="cancel" type="submit">CANCEL</button>
+        <button class="btn primary" id="squadSave" type="button">SAVE SQUAD</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

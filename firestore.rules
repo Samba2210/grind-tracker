@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Player profiles (name, colour, small avatar image)
+    match /players/{id} {
+      allow read: if true;
+      allow write: if id in ['p1', 'p2', 'p3', 'p4']
+        && request.resource.data.keys().hasOnly(['name', 'color', 'avatar'])
+        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 16))
+        && (!('avatar' in request.resource.data) || (request.resource.data.avatar is string && request.resource.data.avatar.size() < 200000));
+    }
+
+    // Activities
+    match /activities/{id} {
+      allow read, delete: if true;
+      allow create: if request.resource.data.playerId in ['p1', 'p2', 'p3', 'p4']
+        && request.resource.data.type in ['run', 'cycle', 'swim']
+        && request.resource.data.km is number
+        && request.resource.data.km > 0
+        && request.resource.data.km <= 1000
+        && request.resource.data.date is string
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 80;
+      allow update: if false;
+    }
+  }
+}
