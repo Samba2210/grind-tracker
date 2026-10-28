@@ -802,6 +802,7 @@
     $("#squadCards").innerHTML = roster().filter(p => access.owns(p.id)).map(p => `
       <div class="squad-card" data-id="${esc(p.id)}" style="--c:${esc(p.color)}">
         <label class="pic" title="Upload pic">${avatarHTML(p, "xl")}<input type="file" accept="image/*" hidden><span class="pic-hint">UPLOAD</span></label>
+        <button type="button" class="btn sm ghost pic-clear" ${p.avatar ? "" : "hidden"}>REMOVE PIC</button>
         <label class="field"><span>NAME</span><input class="sq-name" maxlength="16" value="${esc(p.name)}"></label>
         <label class="field"><span>COLOUR</span><input class="sq-color" type="color" value="${esc(p.color)}"></label>
         ${teams.length ? `<label class="field"><span>TEAM</span><select class="sq-team">${teamOpts(p.team)}</select></label>` : ""}
@@ -818,9 +819,23 @@
         const url = await resizeImage(e.target.files[0]);
         pending[id] = { ...pending[id], avatar: url };
         card.querySelector(".avatar").innerHTML = `<img src="${url}" alt="">`;
+        card.querySelector(".pic-clear").hidden = false;
       } catch { toast("COULDN'T READ THAT IMAGE", "bad"); }
     }
     if (e.target.classList.contains("sq-color")) card.style.setProperty("--c", e.target.value);
+  });
+
+  // clearing a pic saves an empty avatar, which falls back to the player's initials
+  $("#squadCards").addEventListener("click", e => {
+    const btn = e.target.closest(".pic-clear");
+    if (!btn) return;
+    const card = btn.closest(".squad-card");
+    const id = card.dataset.id;
+    pending[id] = { ...pending[id], avatar: "" };
+    const name = card.querySelector(".sq-name").value || roster().find(p => p.id === id).name;
+    card.querySelector(".avatar").innerHTML = `<span>${esc(name.trim().slice(0, 2).toUpperCase())}</span>`;
+    card.querySelector("input[type=file]").value = "";
+    btn.hidden = true;
   });
 
   $("#squadSave").addEventListener("click", async () => {
