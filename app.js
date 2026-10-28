@@ -9,6 +9,7 @@
     run:   { label: "RUN",   icon: "🏃", verb: "ran" },
     cycle: { label: "CYCLE", icon: "🚴", verb: "cycled" },
     swim:  { label: "SWIM",  icon: "🏊", verb: "swam" },
+    golf:  { label: "GOLF WIN", icon: "⛳", verb: "won at Golf with Friends", flat: true },
   };
 
   const TITLES = [
@@ -26,6 +27,7 @@
     { id: "lap",    label: "NEW GAME+",   tip: "Finished the whole route",     test: s => s.pts >= GOAL },
     { id: "bet",    label: "HUSTLER",     tip: "Won a challenge",              test: s => s.betWins > 0 },
     { id: "roll",   label: "HIGH ROLLER", tip: "Staked 10 km+ on a challenge", test: s => s.bigBet },
+    { id: "golf",   label: "CLUBHOUSE",   tip: "Won 5 games of Golf with Friends", test: s => s.raw.golf >= 5 },
   ];
 
   // No stake cap: losses can push a total below zero, and that's debt.
@@ -39,6 +41,10 @@
   };
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const mult = t => CFG.multipliers[t] ?? 1;
+  // golf is a flat bonus per win (stored as km: 1); everything else is distance x multiplier
+  const GOLF_WIN = CFG.golfWin ?? 3;
+  const points = a => TYPES[a.type]?.flat ? GOLF_WIN : a.km * mult(a.type);
+  const typeRate = t => TYPES[t].flat ? `+${GOLF_WIN} KM` : `×${mult(t)}`;
   const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
   const safeImg = src => typeof src === "string" && src.startsWith("data:image/") ? src : null;
 
@@ -54,6 +60,7 @@
     user: null,       // signed-in Google account
     ready: false,
     claimDismissed: false,
+    follow: ls.get("gbg-follow", null), // whose player the map camera follows
     store: null,
   };
 
@@ -90,6 +97,7 @@
       async deleteActivity(id) { data.activities = data.activities.filter(a => a.id !== id); emit(); },
       async addChallenge(c) { data.challenges.push({ ...c, id: uid() }); emit(); },
       async updateChallenge(id, f) { data.challenges = data.challenges.map(c => c.id === id ? { ...c, ...f } : c); emit(); },
+      async deleteChallenge(id) { data.challenges = data.challenges.filter(c => c.id !== id); emit(); },
     };
   }
 
@@ -154,6 +162,7 @@
       deleteActivity: id => fs.deleteDoc(fs.doc(db, "activities", id)),
       addChallenge: c => fs.addDoc(fs.collection(db, "challenges"), c),
       updateChallenge: (id, f) => fs.updateDoc(fs.doc(db, "challenges", id), f),
+      deleteChallenge: id => fs.deleteDoc(fs.doc(db, "challenges", id)),
     };
   }
 
@@ -201,9 +210,9 @@
   function computeStats() {
     return roster().map(p => {
       const acts = state.activities.filter(a => a.playerId === p.id && TYPES[a.type]);
-      const raw = { run: 0, cycle: 0, swim: 0 };
+      const raw = Object.fromEntries(Object.keys(TYPES).map(t => [t, 0]));
       let pts = 0;
-      acts.forEach(a => { raw[a.type] += a.km; pts += a.km * mult(a.type); });
+      acts.forEach(a => { raw[a.type] += a.km; pts += points(a); });
       const { net: bets, wins: betWins } = betResults(p.id);
       pts += bets;
       const progress = Math.max(0, pts); // debt keeps you parked at Land's End
@@ -241,8 +250,10 @@
     const squad = stats.reduce((s, p) => s + p.pts, 0);
     $("#squadTotal").textContent = `SQUAD: ${fmt(squad, 0)}`;
     $("#board").innerHTML = stats.map((p, i) => {
-      const raw = Object.keys(TYPES).map(t =>
-        `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${p.raw[t].toFixed(1)}</span>`).join("") +
+      const raw = Object.keys(TYPES).filter(t => !TYPES[t].flat || p.raw[t]).map(t =>
+        TYPES[t].flat
+          ? `<span title="Golf with Friends wins">${TYPES[t].icon} ${p.raw[t]}W</span>`
+          : `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${p.raw[t].toFixed(1)}</span>`).join("") +
         (p.bets ? `<span class="${p.bets > 0 ? "up" : "down"}" title="Challenge winnings">🎲 ${p.bets > 0 ? "+" : ""}${p.bets.toFixed(1)}</span>` : "");
       const nextTxt = p.debt
         ? `IN DEBT: run off ${fmt(-p.pts)} to get moving`
@@ -289,47 +300,215 @@
     $("#teams").innerHTML = `<div class="tug">${tug}</div><div class="team-cards">${cards.join(`<div class="vs">VS</div>`)}</div>`;
   }
 
-  // The bottom slice of the map is the sea off Land's End. Anyone in debt sinks into it,
-  // deeper the more they owe (the biggest debtor, or 10 km of debt, sits on the sea bed).
-  const OCEAN_PCT = 15;
+  // ---------- world map (side-scroller) ----------
+  // Land's End is on the left, John o' Groats on the right. The camera follows one player
+  // (you, or the leader for viewers) and you can drag, swipe or tap the mini-map to look around.
+  // The sea west of Land's End is where anyone in debt sinks, deeper the more they owe.
+  const MAP = {
+    pxPerKm: 10,
+    sea: 520,        // px of ocean before km 0
+    tail: 420,       // px of land after the finish
+    blk: 80,         // terrain block width
+    ground: 92,      // base ground height
+    step: 22,        // height of one terrain step
+    surface: 80,     // sea level
+    gemEvery: 20,    // km between gems
+  };
+  const mapX = km => MAP.sea + km * MAP.pxPerKm;
+  const worldW = () => mapX(GOAL) + MAP.tail;
+  const zoneAt = km => CFG.route.zones.findIndex(z => km >= z.fromKm && km < z.toKm);
+  const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 
-  function renderTrack(stats) {
-    const pct = km => OCEAN_PCT + (km / GOAL) * (100 - OCEAN_PCT);
-    const debtors = stats.filter(p => p.debt);
-    const deepest = Math.max(10, ...debtors.map(p => -p.pts));
-    const depthPct = p => OCEAN_PCT - 4 - (-p.pts / deepest) * (OCEAN_PCT - 8);
+  // Rolling stepped hills, rising into the Highlands. Neighbouring blocks differ by one step at most.
+  let terrain = null;
+  function terrainLevels() {
+    if (terrain) return terrain;
+    const n = Math.ceil((worldW() - MAP.sea) / MAP.blk);
+    terrain = [];
+    for (let i = 0; i < n; i++) {
+      const km = (i * MAP.blk) / MAP.pxPerKm;
+      const scot = km >= 820 ? Math.min(2, (km - 820) / 120) : 0;
+      let lv = Math.round(1.4 + 1.2 * Math.sin(km / 53) + 0.8 * Math.sin(km / 17 + 2) + scot + (scot ? Math.sin(km / 29) : 0));
+      lv = Math.max(0, Math.min(6, lv));
+      if (i < 2 || km > GOAL) lv = Math.min(lv, 1); // flat at the start line and the finish
+      if (i) lv = Math.max(terrain[i - 1] - 1, Math.min(terrain[i - 1] + 1, lv));
+      terrain.push(lv);
+    }
+    return terrain;
+  }
+  const groundAt = km => {
+    const i = Math.floor((Math.max(0, km) * MAP.pxPerKm) / MAP.blk);
+    const t = terrainLevels();
+    return MAP.ground + MAP.step * t[Math.min(i, t.length - 1)];
+  };
 
+  function buildWorld() {
+    const t = terrainLevels();
     let html = `
-      <div class="ocean" style="height:${OCEAN_PCT}%">
-        <span>THE ATLANTIC</span>
-        ${debtors.length ? `<i class="shark" aria-hidden="true">🦈</i>` : ""}
+      <div class="sea" style="width:${MAP.sea}px;height:${MAP.surface}px">
+        <span>THE ATLANTIC</span><i class="shark" aria-hidden="true" hidden>🦈</i>
       </div>`;
-    CFG.route.zones.forEach((z, i) => {
-      html += `<div class="zone z${i}" style="bottom:${pct(z.fromKm)}%;height:${pct(z.toKm) - pct(z.fromKm)}%"><span>${esc(z.name)}</span></div>`;
+    t.forEach((lv, i) => {
+      const left = MAP.sea + i * MAP.blk;
+      const km = (i * MAP.blk) / MAP.pxPerKm;
+      const z = Math.max(0, zoneAt(Math.min(km, GOAL - 0.01)));
+      const h = MAP.ground + MAP.step * lv;
+      html += `<div class="blk z${z}" style="left:${left}px;width:${MAP.blk}px;height:${h}px"></div>`;
+      const r = hash(i);
+      const deco = z === 0 ? (r < .22 ? "🌳" : r < .3 ? "🐑" : r < .34 ? "🏠" : "") : (r < .26 ? "🌲" : r < .32 ? "🦌" : r < .36 ? "🏰" : "");
+      if (deco && i > 1 && km < GOAL - 10) html += `<span class="deco" style="left:${left + 10 + hash(i + 99) * 40}px;bottom:${h - 4}px">${deco}</span>`;
     });
-    html += `<div class="rail" style="bottom:${OCEAN_PCT}%"></div>`;
-    const leader = stats[0];
-    if (leader) html += `<div class="rail-fill" style="bottom:${OCEAN_PCT}%;height:${pct(Math.min(Math.max(0, leader.pts), GOAL)) - OCEAN_PCT}%"></div>`;
+    CFG.route.zones.forEach((z, i) => {
+      if (i) html += `<div class="zgate" style="left:${mapX(z.fromKm) - 4}px;bottom:${groundAt(z.fromKm)}px"><span>${esc(z.name)}</span></div>`;
+    });
+    for (let km = MAP.gemEvery; km < GOAL; km += MAP.gemEvery) {
+      html += `<i class="gem" data-km="${km}" style="left:${mapX(km) - 7}px;bottom:${groundAt(km) + 64}px"></i>`;
+    }
     CFG.route.checkpoints.forEach((c, i, arr) => {
       const cls = i === 0 ? "start" : i === arr.length - 1 ? "finish" : "";
-      html += `<div class="cp ${cls}" style="bottom:${pct(c.km)}%"><span class="cp-dot"></span><span class="cp-label">${esc(c.name)}<small>${fmt(c.km, 0)}</small></span></div>`;
-    });
-
-    // markers: cluster nearby players side-by-side
-    // markers closer than one marker-height apart sit side-by-side (the map is hidden on some phone tabs, so fall back to 600px)
-    const near = 62 / ($("#track").clientHeight || 600) * 100;
-    const placed = stats.map(p => ({ p, at: p.debt ? depthPct(p) : pct(p.pos) })).sort((a, b) => a.at - b.at);
-    let clusterStart = -99, off = 0;
-    placed.forEach(({ p, at }) => {
-      if (at - clusterStart < near) off++; else { clusterStart = at; off = 0; }
       html += `
-        <div class="marker ${p.debt ? "sunk" : ""}" style="bottom:${at}%;--off:${off};--c:${esc(p.color)};--t:${esc(p.teamInfo?.color || p.color)}" title="${esc(p.name)}${p.teamInfo ? ` (${esc(p.teamInfo.name)})` : ""}: ${fmt(p.pts)}${p.debt ? " (IN DEBT)" : ""}">
-          ${avatarHTML(p)}
-          ${p.lap > 1 ? `<span class="lap">L${p.lap}</span>` : ""}
-          <span class="mk-name">${p.debt ? p.pts.toFixed(1) : esc(p.name)}</span>
+        <div class="cp ${cls} ${i % 2 ? "alt" : ""}" data-km="${c.km}" style="left:${mapX(c.km)}px;bottom:${groundAt(c.km)}px">
+          <i class="pole"></i><i class="flag"></i>
+          <span class="sign">${esc(c.name)}<small>${fmt(c.km, 0)}</small></span>
         </div>`;
     });
-    $("#track").innerHTML = html;
+    return `
+      <div class="sky"></div><div class="para far"></div><div class="para mid"></div>
+      <div class="vp" id="mapVp"><div class="world" style="width:${worldW()}px">${html}<div class="markers" id="markers"></div></div></div>
+      <div class="hud"><div class="hud-me" id="hudMe"></div><div class="hud-zone" id="hudZone"></div><div class="hud-follow" id="hudFollow"></div></div>
+      <div class="mini" id="mini" title="Jump along the route"><i class="mini-view" id="miniView"></i><div id="miniDots"></div></div>`;
+  }
+
+  const cam = { id: null, x: null, dragged: false };
+
+  function followed(stats) {
+    const id = state.follow && stats.some(p => p.id === state.follow) ? state.follow : access.me || stats[0]?.id;
+    return stats.find(p => p.id === id);
+  }
+
+  function centerOn(x, smooth) {
+    const vp = $("#mapVp");
+    if (!vp || !vp.clientWidth) return;
+    vp.scrollTo({ left: Math.max(0, x - vp.clientWidth * 0.4), behavior: smooth ? "smooth" : "auto" });
+  }
+
+  function onMapScroll() {
+    const vp = $("#mapVp");
+    if (!vp) return;
+    const track = $("#track");
+    track.style.setProperty("--sx", vp.scrollLeft);
+    const km = (vp.scrollLeft + vp.clientWidth / 2 - MAP.sea) / MAP.pxPerKm;
+    const z = CFG.route.zones[zoneAt(km)];
+    $("#hudZone").textContent = km < 0 ? "THE ATLANTIC" : z ? z.name : "THE END OF THE ROAD";
+    const W = worldW();
+    $("#miniView").style.cssText = `left:${(vp.scrollLeft / W) * 100}%;width:${(vp.clientWidth / W) * 100}%`;
+  }
+
+  function wireMap() {
+    const vp = $("#mapVp");
+    let raf = 0;
+    vp.addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; onMapScroll(); }); }, { passive: true });
+    // mouse drag to pan (touch already scrolls natively)
+    let drag = null;
+    vp.addEventListener("pointerdown", e => {
+      if (e.pointerType !== "mouse") return;
+      drag = { x: e.clientX, left: vp.scrollLeft };
+      cam.dragged = false;
+    });
+    window.addEventListener("pointermove", e => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      if (Math.abs(dx) > 4) { cam.dragged = true; vp.classList.add("dragging"); }
+      vp.scrollLeft = drag.left - dx;
+    });
+    window.addEventListener("pointerup", () => { drag = null; vp.classList.remove("dragging"); });
+    vp.addEventListener("click", e => {
+      const m = e.target.closest("[data-mk]");
+      if (m && !cam.dragged) setFollow(m.dataset.mk);
+    });
+    $("#hudFollow").addEventListener("click", e => {
+      const b = e.target.closest("[data-follow]");
+      if (b) setFollow(b.dataset.follow);
+    });
+    $("#mini").addEventListener("click", e => {
+      const r = $("#mini").getBoundingClientRect();
+      vp.scrollTo({ left: ((e.clientX - r.left) / r.width) * worldW() - vp.clientWidth / 2, behavior: "smooth" });
+    });
+    window.addEventListener("resize", () => { if (cam.x !== null) centerOn(cam.x, false); });
+  }
+
+  function setFollow(id) {
+    state.follow = id;
+    ls.set("gbg-follow", id);
+    cam.id = null; // force the camera to fly over
+    renderTrack(computeStats());
+  }
+
+  function renderTrack(stats, { recenter = false } = {}) {
+    const track = $("#track");
+    if (!$("#mapVp")) { track.innerHTML = buildWorld(); wireMap(); }
+
+    const debtors = stats.filter(p => p.debt);
+    const deepest = Math.max(10, ...debtors.map(p => -p.pts));
+    const far = Math.max(0, ...stats.map(p => p.pos));
+    const me = followed(stats);
+    $(".shark", track).hidden = !debtors.length;
+    track.querySelectorAll(".gem").forEach(g => g.classList.toggle("got", +g.dataset.km <= far));
+    track.querySelectorAll(".cp").forEach(c => c.classList.toggle("reached", !!me && !me.debt && +c.dataset.km <= me.pos));
+
+    // where everyone stands; players at the same spot stand on each other's heads
+    const spots = stats.map(p => {
+      if (p.debt) {
+        const i = debtors.indexOf(p);
+        return { p, x: MAP.sea - 90 - i * 80, y: MAP.surface - 34 - (-p.pts / deepest) * (MAP.surface - 46) };
+      }
+      return { p, x: mapX(p.pos), y: groundAt(p.pos) };
+    }).sort((a, b) => a.x - b.x);
+    let base = null, stack = 0;
+    spots.forEach(s => {
+      if (!s.p.debt && base && s.x - base.x < 40) { stack++; s.x = base.x; s.y = base.y + stack * 56; }
+      else { base = s; stack = 0; }
+    });
+
+    const layer = $("#markers");
+    const seen = new Set();
+    spots.forEach(({ p, x, y }) => {
+      seen.add(p.id);
+      let el = layer.querySelector(`[data-mk="${p.id}"]`);
+      if (!el) { el = document.createElement("div"); el.dataset.mk = p.id; layer.appendChild(el); }
+      const moved = el.dataset.x && +el.dataset.x !== x;
+      el.dataset.x = x;
+      el.className = `marker ${p.debt ? "sunk" : ""} ${me && p.id === me.id ? "me" : ""} ${moved ? "walk" : ""}`;
+      el.style.cssText = `left:${x}px;bottom:${y}px;--c:${p.color};--t:${p.teamInfo?.color || p.color}`;
+      el.title = `${p.name}${p.teamInfo ? ` (${p.teamInfo.name})` : ""}: ${fmt(p.pts)}${p.debt ? " (IN DEBT)" : ""}`;
+      el.innerHTML = `
+        <span class="mk-name">${p.debt ? p.pts.toFixed(1) : esc(p.name)}</span>
+        ${avatarHTML(p)}
+        ${p.lap > 1 ? `<span class="lap">L${p.lap}</span>` : ""}`;
+      if (moved) setTimeout(() => el.classList.remove("walk"), 1300);
+    });
+    layer.querySelectorAll("[data-mk]").forEach(el => { if (!seen.has(el.dataset.mk)) el.remove(); });
+
+    // HUD
+    if (me) {
+      $("#hudMe").innerHTML = `${avatarHTML(me, "sm")}<div><b style="color:${esc(me.color)}">${esc(me.name)}</b> ${fmt(me.pts)}
+        <small>${me.debt ? `IN THE SEA: ${fmt(-me.pts)} TO SWIM OFF` : me.next ? `NEXT: ${esc(me.next.name)} in ${fmt(me.next.km - me.pos, 0)}` : "AT THE FINISH"}</small></div>`;
+    }
+    $("#hudFollow").innerHTML = stats.map(p =>
+      `<button type="button" data-follow="${esc(p.id)}" class="${me && p.id === me.id ? "on" : ""}" title="Follow ${esc(p.name)}">${avatarHTML(p, "sm")}</button>`).join("");
+    const W = worldW();
+    $("#miniDots").innerHTML =
+      CFG.route.checkpoints.map(c => `<i class="mini-cp" style="left:${(mapX(c.km) / W) * 100}%"></i>`).join("") +
+      spots.map(({ p, x }) => `<i class="mini-dot" style="left:${(x / W) * 100}%;--c:${esc(p.color)}"></i>`).join("");
+
+    // camera: fly to the followed player when they move or the target changes
+    const target = spots.find(s => me && s.p.id === me.id);
+    if (target && (recenter || cam.id !== me.id || cam.x !== target.x)) {
+      const smooth = cam.id !== null && !recenter;
+      cam.id = me.id; cam.x = target.x;
+      requestAnimationFrame(() => centerOn(target.x, smooth));
+    }
+    requestAnimationFrame(onMapScroll);
   }
 
   const localDate = ts => { const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
@@ -369,8 +548,8 @@
         <li class="feed-item" style="--c:${esc(p.color)}">
           ${avatarHTML(p, "sm")}
           <div class="feed-body">
-            <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb} ${fmt(a.km)} ${TYPES[a.type].icon}
-              <span class="gain">+${(a.km * mult(a.type)).toFixed(1)}</span></div>
+            <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb}${TYPES[a.type].flat ? "" : ` ${fmt(a.km)}`} ${TYPES[a.type].icon}
+              <span class="gain">+${points(a).toFixed(1)}</span></div>
             <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}</div>
           </div>
           ${access.owns(a.playerId) ? `<button class="del" data-id="${esc(a.id)}" type="button" title="Delete">✕</button>` : ""}
@@ -382,6 +561,9 @@
   // A player can settle straight away in their opponent's favour, but a win they claim for
   // themselves needs the other side to confirm. The admin referees bets they're not part of.
   const OPEN_BET = ["active", "claimed", "disputed"];
+
+  // the bettor can reword or withdraw a bet until it's accepted; the admin can fix or remove any bet
+  const canEditBet = c => access.admin || (access.me === c.from && c.status === "pending");
 
   function challengeCard(c, P) {
     const f = P[c.from], t = P[c.to];
@@ -398,7 +580,6 @@
     if (c.status === "pending") {
       status = `AWAITING ${esc(t.name)}`;
       if (isTo || referee) actions += btn("accept", "ACCEPT", "primary") + confirmBtn("decline", "DECLINE");
-      if (isFrom || referee) actions += confirmBtn("cancel", "CANCEL BET", "ghost");
     } else if (c.status === "active") {
       status = overdue ? "OVERDUE" : "● LIVE";
       if (isTo) actions = proof + confirmBtn("claim", "✔ I DID IT", "win") + confirmBtn("failed", "✖ I FAILED", "lose");
@@ -420,6 +601,7 @@
       const w = P[betWinner(c)];
       status = `${esc(w.name)} WON`;
     }
+    if (canEditBet(c)) actions += btn("edit", "EDIT", "ghost") + confirmBtn("delete", "DELETE", "ghost");
     const payout = betWinner(c) ? "" : `
       <div class="ch-payout">
         <span>DOES IT: <b style="color:${esc(t.color)}">${esc(t.name)} +${stake}</b> · ${esc(f.name)} −${stake}</span>
@@ -461,7 +643,7 @@
 
   function renderRules() {
     $("#rules").innerHTML = `<h3>MULTIPLIERS</h3><div class="mults">` +
-      Object.keys(TYPES).map(t => `<span>${TYPES[t].icon} ${TYPES[t].label} <b>×${mult(t)}</b></span>`).join("") + `</div>`;
+      Object.keys(TYPES).map(t => `<span>${TYPES[t].icon} ${TYPES[t].label} <b>${typeRate(t)}</b></span>`).join("") + `</div>`;
   }
 
   // players can only act as themselves; the admin (and local mode) can pick anyone
@@ -559,9 +741,12 @@
   }
 
   function updatePreview() {
+    const type = selectedType(), flat = !!TYPES[type].flat;
+    $("#distField").hidden = flat;
+    $("#fDist").required = !flat;
     const v = parseFloat($("#fDist").value);
-    if (!(v > 0)) { $("#preview").textContent = ""; return; }
-    $("#preview").textContent = `= +${fmt(v * mult(selectedType()))} ADJUSTED`;
+    if (!flat && !(v > 0)) { $("#preview").textContent = ""; return; }
+    $("#preview").textContent = `= +${fmt(points({ type, km: v }))} ADJUSTED`;
   }
 
   function resizeImage(file, size = 160) {
@@ -712,7 +897,7 @@
   function setupForm() {
     $("#fTypes").innerHTML = Object.keys(TYPES).map((t, i) => `
       <label class="type-opt"><input type="radio" name="type" value="${t}" ${i === 0 ? "checked" : ""}>
-        <span><i>${TYPES[t].icon}</i>${TYPES[t].label}<small>×${mult(t)}</small></span></label>`).join("");
+        <span><i>${TYPES[t].icon}</i>${TYPES[t].label}<small>${typeRate(t)}</small></span></label>`).join("");
     $("#fDate").value = today();
     $("#fDate").max = today();
     ["input", "change"].forEach(ev => $("#logForm").addEventListener(ev, updatePreview));
@@ -722,8 +907,9 @@
       const playerId = $("#fPlayer").value;
       const type = selectedType();
       const v = parseFloat($("#fDist").value);
-      if (!(v > 0)) return;
-      const km = Math.round(v * 1000) / 1000;
+      if (!TYPES[type].flat && !(v > 0)) return;
+      const km = TYPES[type].flat ? 1 : Math.round(v * 1000) / 1000;
+      const gained = points({ type, km });
 
       const statsBefore = computeStats();
       const before = statsBefore.find(s => s.id === playerId);
@@ -738,9 +924,9 @@
           createdAt: Date.now(),
         });
         ls.set("gbg-last-player", playerId);
-        toast(`+${fmt(km * mult(type))} ${TYPES[type].icon}`, "good");
+        toast(`+${fmt(gained)} ${TYPES[type].icon}`, "good");
 
-        const afterPts = before.pts + km * mult(type);
+        const afterPts = before.pts + gained;
         if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1}`, "lvl");
         if (passedCheckpoints(afterPts) > passedCheckpoints(before.pts)) {
           const pos = afterPts % GOAL;
@@ -749,7 +935,7 @@
         }
         const myTeam = teamsBefore.find(t => t.id === before.team);
         const rival = teamsBefore.filter(t => t !== myTeam).reduce((m, t) => Math.max(m, t.pts), 0);
-        if (myTeam && myTeam.pts <= rival && myTeam.pts + km * mult(type) > rival) toast(`${myTeam.name} TAKES THE LEAD!`, "lvl");
+        if (myTeam && myTeam.pts <= rival && myTeam.pts + gained > rival) toast(`${myTeam.name} TAKES THE LEAD!`, "lvl");
         $("#fDist").value = "";
         $("#fNote").value = "";
         updatePreview();
@@ -777,19 +963,35 @@
   });
 
   // ---------- challenges ----------
-  function openChallenge() {
+  let editingBet = null; // id of the bet the dialog is editing, or null for a new one
+
+  function openChallenge(bet = null) {
+    editingBet = bet?.id || null;
     const opts = list => list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const from = $("#cFrom"), to = $("#cTo");
-    from.innerHTML = opts(selectablePlayers());
+    from.innerHTML = opts(bet ? roster() : selectablePlayers());
     to.innerHTML = opts(roster());
-    from.value = access.admin ? ls.get("gbg-last-player", CFG.players[0].id) : access.me;
-    from.disabled = !access.admin;
-    to.value = CFG.players.find(p => p.id !== from.value).id;
-    $("#cDeadline").min = today();
+    if (bet) {
+      from.value = bet.from;
+      to.value = bet.to;
+      $("#cStake").value = bet.stake;
+      $("#cDesc").value = bet.desc;
+      $("#cDeadline").value = bet.deadline || "";
+    } else {
+      from.value = access.admin ? ls.get("gbg-last-player", CFG.players[0].id) : access.me;
+      to.value = CFG.players.find(p => p.id !== from.value).id;
+      $("#cStake").value = $("#cDesc").value = $("#cDeadline").value = "";
+    }
+    from.disabled = !!bet || !access.admin;
+    to.disabled = !!bet;
+    $("#cDeadline").min = bet ? "" : today();
+    $("#chTitle").textContent = bet ? "EDIT CHALLENGE" : "ISSUE A CHALLENGE";
+    $("#chSubmit").textContent = bet ? "✔ SAVE CHANGES" : "⚔ SEND CHALLENGE";
+    $("#chRules").hidden = !!bet;
     $("#chDlg").showModal();
   }
 
-  $("#chBtn").addEventListener("click", openChallenge);
+  $("#chBtn").addEventListener("click", () => openChallenge());
   $("#chClose").addEventListener("click", () => $("#chDlg").close());
 
   $("#chForm").addEventListener("submit", async e => {
@@ -803,6 +1005,19 @@
     if (!desc) return;
     const btn = e.submitter || $("#chForm button[type=submit]");
     btn.disabled = true;
+    if (editingBet) {
+      try {
+        await state.store.updateChallenge(editingBet, { stake, desc, deadline: $("#cDeadline").value || "" });
+        $("#chDlg").close();
+        toast("BET UPDATED", "good");
+      } catch (err) {
+        console.error(err);
+        toast("COULDN'T SAVE THE BET", "bad");
+      } finally {
+        btn.disabled = false;
+      }
+      return;
+    }
     try {
       await state.store.addChallenge({
         from, to, stake, desc,
@@ -838,6 +1053,13 @@
     if (!c) return;
     const P = Object.fromEntries(roster().map(p => [p.id, p]));
     const act = btn.dataset.act;
+    if (act === "edit") { openChallenge(c); return; }
+    if (act === "delete") {
+      btn.disabled = true;
+      try { await state.store.deleteChallenge(c.id); toast("BET DELETED"); }
+      catch (err) { console.error(err); toast("DELETE FAILED", "bad"); btn.disabled = false; }
+      return;
+    }
     const fields = {
       accept: { status: "active" },
       decline: { status: "declined" },
@@ -887,7 +1109,7 @@
     const b = e.target.closest("button");
     if (!b) return;
     setView(b.dataset.view, b.dataset.tab);
-    if (b.dataset.view === "map") renderTrack(computeStats()); // re-space markers now the map has a real height
+    if (b.dataset.view === "map") renderTrack(computeStats(), { recenter: true }); // the map was hidden, so point the camera now it has a size
     window.scrollTo(0, 0);
   });
 

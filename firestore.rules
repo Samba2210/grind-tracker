@@ -97,6 +97,16 @@ service cloud.firestore {
           || (c.status in ['active', 'claimed', 'disputed'] && to in ['completed', 'failed', 'cancelled']));
     }
 
+    function validTerms(d) {
+      return d.stake is number && d.stake > 0 && d.stake <= 100000
+        && d.desc is string && d.desc.size() > 0 && d.desc.size() <= 100
+        && d.deadline is string && d.deadline.size() <= 10;
+    }
+    // The bettor can reword or withdraw a bet until it's accepted; the admin can fix or remove any bet.
+    function canEditBet() {
+      return isAdmin() || (isPlayer(resource.data.from) && resource.data.status == 'pending');
+    }
+
     match /challenges/{id} {
       allow read: if true;
       allow create: if (isAdmin() || isPlayer(request.resource.data.from))
@@ -104,19 +114,14 @@ service cloud.firestore {
         && request.resource.data.from in players()
         && request.resource.data.to in players()
         && request.resource.data.from != request.resource.data.to
-        && request.resource.data.stake is number
-        && request.resource.data.stake > 0
-        && request.resource.data.stake <= 100000
-        && request.resource.data.desc is string
-        && request.resource.data.desc.size() > 0
-        && request.resource.data.desc.size() <= 100
-        && request.resource.data.deadline is string
-        && request.resource.data.deadline.size() <= 10
+        && validTerms(request.resource.data)
         && request.resource.data.status == 'pending';
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claim', 'claimedBy', 'proof', 'resolvedAt'])
-        && (!('proof' in request.resource.data) || (request.resource.data.proof is string && request.resource.data.proof.size() <= 60))
-        && ((isMember() && partyMove()) || refereeMove());
-      allow delete: if false;
+      allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claim', 'claimedBy', 'proof', 'resolvedAt'])
+          && (!('proof' in request.resource.data) || (request.resource.data.proof is string && request.resource.data.proof.size() <= 60))
+          && ((isMember() && partyMove()) || refereeMove()))
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stake', 'desc', 'deadline'])
+          && validTerms(request.resource.data) && canEditBet());
+      allow delete: if canEditBet();
     }
 
     // Activities: players log and delete their own; the admin can do anyone's
@@ -124,8 +129,9 @@ service cloud.firestore {
       allow read: if true;
       allow create: if (isAdmin() || isPlayer(request.resource.data.playerId))
         && request.resource.data.playerId in players()
-        && request.resource.data.type in ['run', 'cycle', 'swim']
+        && request.resource.data.type in ['run', 'cycle', 'swim', 'golf']
         && request.resource.data.km is number
+        && (request.resource.data.type != 'golf' || request.resource.data.km == 1)
         && request.resource.data.km > 0
         && request.resource.data.km <= 1000
         && request.resource.data.date is string

@@ -22,10 +22,13 @@ window.APP_CONFIG = {
 
   // Adjusted km earned per real km. Tweak to keep it fair.
   multipliers: {
-    run: 1,
-    cycle: 0.3,
-    swim: 4,
+    cycle: 1,
+    run: 4,
+    swim: 16,
   },
+
+  // Adjusted km for each win at Golf with Friends (flat, no distance)
+  golfWin: 3,
 
   // Adjusted km per level on the leaderboard
   kmPerLevel: 20,
@@ -55,15 +58,34 @@ window.APP_CONFIG = {
     ],
     checkpoints: [
       { name: "Land's End", km: 0 },
+      { name: "Penzance", km: 16 },
+      { name: "Truro", km: 60 },
+      { name: "Bodmin", km: 95 },
+      { name: "Launceston", km: 130 },
       { name: "Exeter", km: 180 },
+      { name: "Taunton", km: 230 },
       { name: "Bristol", km: 300 },
+      { name: "Gloucester", km: 355 },
+      { name: "Worcester", km: 395 },
       { name: "Birmingham", km: 440 },
+      { name: "Stoke", km: 510 },
       { name: "Manchester", km: 570 },
+      { name: "Preston", km: 625 },
+      { name: "Lancaster", km: 660 },
       { name: "Kendal", km: 690 },
+      { name: "Penrith", km: 735 },
+      { name: "Carlisle", km: 775 },
       { name: "Scottish Border", km: 820 },
+      { name: "Lockerbie", km: 850 },
       { name: "Glasgow", km: 930 },
+      { name: "Stirling", km: 975 },
       { name: "Perth", km: 1035 },
+      { name: "Pitlochry", km: 1080 },
+      { name: "Aviemore", km: 1160 },
       { name: "Inverness", km: 1210 },
+      { name: "Dingwall", km: 1235 },
+      { name: "Helmsdale", km: 1330 },
+      { name: "Wick", km: 1380 },
       { name: "John o' Groats", km: 1407 },
     ],
   },
