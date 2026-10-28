@@ -9,22 +9,13 @@ window.APP_CONFIG = {
   // Leave as null to run in LOCAL MODE (data only saved in this browser).
   // See README.md for the 5-minute setup.
   firebase: {
-  apiKey: "AIzaSyB3ap9PlBOfaVgF5g6jTZgNNJ9kfClQ4kY",
-  authDomain: "grind-tracker-3977e.firebaseapp.com",
-  projectId: "grind-tracker-3977e",
-  storageBucket: "grind-tracker-3977e.firebasestorage.app",
-  messagingSenderId: "258860846223",
-  appId: "1:258860846223:web:aac581018f41f58e8ef4fa",
-  measurementId: "G-RRK3M3CHZ9"
-},
-  // firebase: {
-  //   apiKey: "...",
-  //   authDomain: "your-project.firebaseapp.com",
-  //   projectId: "your-project",
-  //   storageBucket: "your-project.appspot.com",
-  //   messagingSenderId: "...",
-  //   appId: "..."
-  // },
+    apiKey: "AIzaSyB3ap9PlBOfaVgF5g6jTZgNNJ9kfClQ4kY",
+    authDomain: "grind-tracker-3977e.firebaseapp.com",
+    projectId: "grind-tracker-3977e",
+    storageBucket: "grind-tracker-3977e.firebasestorage.app",
+    messagingSenderId: "258860846223",
+    appId: "1:258860846223:web:aac581018f41f58e8ef4fa",
+  },
 
   // Adjusted km earned per real km. Tweak to keep it fair.
   multipliers: {

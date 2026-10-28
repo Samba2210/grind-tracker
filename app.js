@@ -145,7 +145,7 @@
         `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${toUnit(p.raw[t]).toFixed(1)}</span>`).join("");
       const nextTxt = p.next ? `NEXT: ${esc(p.next.name)} in ${fmt(p.next.km - p.pos, 0)}` : "";
       return `
-        <li class="entry rank-${i + 1}" style="--c:${esc(p.color)}">
+        <li class="entry ${p.pts > 0 ? `rank-${i + 1}` : ""}" style="--c:${esc(p.color)}">
           <div class="rank">${i + 1}</div>
           ${avatarHTML(p, "lg")}
           <div class="info">
