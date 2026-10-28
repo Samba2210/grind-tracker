@@ -656,12 +656,14 @@
   // players can only act as themselves; the admin (and local mode) can pick anyone
   const selectablePlayers = () => roster().filter(p => access.admin || p.id === access.me);
 
+  // everyone logs only as their own player, admin included (local mode has no accounts, so it can pick)
   function renderPlayerSelect() {
     const sel = $("#fPlayer");
-    const cur = access.admin ? sel.value || ls.get("gbg-last-player", CFG.players[0].id) : access.me;
-    sel.innerHTML = selectablePlayers().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    const cur = access.local ? sel.value || ls.get("gbg-last-player", CFG.players[0].id) : access.me;
+    sel.innerHTML = roster().filter(p => access.local || p.id === access.me)
+      .map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     if (cur) sel.value = cur;
-    sel.disabled = !access.admin;
+    sel.disabled = !access.local;
   }
 
   function gateHTML(what) {
@@ -684,7 +686,7 @@
     authBtn.textContent = state.user ? "SIGN OUT" : "SIGN IN";
     authBtn.dataset.auth = state.user ? "out" : "in";
 
-    $("#squadBtn").hidden = !access.member;
+    $("#squadBtn").hidden = !access.member && !access.admin;
     $("#squadBtn").textContent = access.admin ? "EDIT SQUAD" : "EDIT PROFILE";
 
     $("#logForm").hidden = !access.member;

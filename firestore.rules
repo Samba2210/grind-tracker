@@ -125,10 +125,11 @@ service cloud.firestore {
       allow delete: if canEditBet();
     }
 
-    // Activities: players log and delete their own; the admin can do anyone's
+    // Activities: everyone (admin included) logs only as their own claimed player.
+    // Players delete their own; the admin can delete anyone's to clean up mistakes.
     match /activities/{id} {
       allow read: if true;
-      allow create: if (isAdmin() || isPlayer(request.resource.data.playerId))
+      allow create: if isPlayer(request.resource.data.playerId)
         && request.resource.data.playerId in players()
         && request.resource.data.type in ['run', 'cycle', 'swim', 'golf']
         && request.resource.data.km is number
