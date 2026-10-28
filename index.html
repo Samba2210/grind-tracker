@@ -26,25 +26,34 @@
   </header>
 
   <main class="layout">
-    <section class="panel area-teams" id="teamsPanel" hidden>
-      <div class="panel-head"><h2>TEAM BATTLE</h2></div>
-      <div id="teams"></div>
-    </section>
-
-    <section class="panel area-board">
-      <div class="panel-head">
-        <h2>LEADERBOARD</h2>
-        <span class="squad-total" id="squadTotal"></span>
-      </div>
-      <ol id="board" class="board"></ol>
-    </section>
-
-    <section class="panel area-map">
+    <section class="panel col-map">
       <div class="panel-head"><h2>WORLD MAP</h2><span class="hint">▲ NORTH</span></div>
       <div id="track" class="track"></div>
     </section>
 
-    <section class="panel area-log">
+    <div class="col col-main">
+      <section class="panel area-teams" id="teamsPanel" hidden>
+        <div class="panel-head"><h2>TEAM BATTLE</h2></div>
+        <div id="teams"></div>
+      </section>
+
+      <section class="panel area-board">
+        <div class="panel-head">
+          <h2>LEADERBOARD</h2>
+          <span class="squad-total" id="squadTotal"></span>
+        </div>
+        <ol id="board" class="board"></ol>
+      </section>
+    </div>
+
+    <div class="col col-side">
+    <nav class="tabs" aria-label="Sections">
+      <button type="button" data-tab="log">▶ LOG</button>
+      <button type="button" data-tab="bets">⚔ BETS<span class="tab-badge" data-bets-badge hidden></span></button>
+      <button type="button" data-tab="feed">☰ FEED</button>
+    </nav>
+
+    <section class="panel area-log" data-panel="log">
       <div class="panel-head"><h2>LOG A QUEST</h2></div>
       <form id="logForm" autocomplete="off">
         <label class="field"><span>PLAYER</span><select id="fPlayer" required></select></label>
@@ -58,16 +67,16 @@
           </label>
         </div>
         <div class="row">
-          <label class="field grow"><span>DATE</span><input id="fDate" type="date" required></label>
+          <label class="field date-field"><span>DATE</span><input id="fDate" type="date" required></label>
+          <label class="field grow"><span>NOTE <em>(OPTIONAL)</em></span><input id="fNote" maxlength="80" placeholder="Brutal hills"></label>
         </div>
-        <label class="field"><span>NOTE <em>(OPTIONAL)</em></span><input id="fNote" maxlength="80" placeholder="Absolutely brutal hills"></label>
         <p class="preview" id="preview"></p>
         <button class="btn primary big" type="submit">▶ SUBMIT</button>
       </form>
       <div class="rules" id="rules"></div>
     </section>
 
-    <section class="panel area-challenges">
+    <section class="panel area-challenges" data-panel="bets">
       <div class="panel-head">
         <h2>CHALLENGES</h2>
         <span class="squad-total" id="chCount"></span>
@@ -76,11 +85,20 @@
       <div id="challenges" class="challenges"></div>
     </section>
 
-    <section class="panel area-feed">
+    <section class="panel area-feed" data-panel="feed">
       <div class="panel-head"><h2>BATTLE LOG</h2></div>
       <ul id="feed" class="feed"></ul>
     </section>
+    </div>
   </main>
+
+  <nav class="bottom-nav" aria-label="Screens">
+    <button type="button" data-view="home"><i>♛</i>RANKS</button>
+    <button type="button" data-view="side" data-tab="log"><i>▶</i>LOG</button>
+    <button type="button" data-view="side" data-tab="bets"><i>⚔</i>BETS<span class="tab-badge" data-bets-badge hidden></span></button>
+    <button type="button" data-view="map"><i>▲</i>MAP</button>
+    <button type="button" data-view="side" data-tab="feed"><i>☰</i>FEED</button>
+  </nav>
 
   <dialog id="squadDlg" class="dlg">
     <form method="dialog" class="dlg-inner" id="squadForm">

@@ -45,6 +45,8 @@
 
   const state = {
     unit: ls.get("gbg-unit", "mi"),
+    view: ["home", "side", "map"].includes(ls.get("gbg-view")) ? ls.get("gbg-view") : "home",
+    tab: ["log", "bets", "feed"].includes(ls.get("gbg-tab")) ? ls.get("gbg-tab") : "log",
     players: {},      // overrides from store
     teams: {},
     activities: [],
@@ -364,6 +366,10 @@
     const done = cs.filter(c => betWinner(c)).sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0)).slice(0, 4);
     const section = (title, list) => list.length ? `<h3 class="ch-group">${title} <span>${list.length}</span></h3>${list.map(c => challengeCard(c, P)).join("")}` : "";
     $("#chCount").textContent = live.length + pending.length ? `${live.length} LIVE · ${pending.length} PENDING` : "";
+    document.querySelectorAll("[data-bets-badge]").forEach(b => {
+      b.textContent = live.length + pending.length;
+      b.hidden = !(live.length + pending.length);
+    });
     $("#challenges").innerHTML =
       section("LIVE", live) + section("PENDING", pending) + section("RECENT RESULTS", done) ||
       `<p class="empty">NO BETS ON THE TABLE. CALL SOMEONE OUT.</p>`;
@@ -601,6 +607,7 @@
       });
       $("#chDlg").close();
       $("#cStake").value = $("#cDesc").value = $("#cDeadline").value = "";
+      setView("side", "bets");
       const P = Object.fromEntries(roster().map(p => [p.id, p]));
       toast(`${P[from].name} CALLS OUT ${P[to].name}!`, "lvl");
     } catch (err) {
@@ -651,6 +658,29 @@
     }
   });
 
+  // ---------- navigation ----------
+  // view: which screen phones show (home | side | map); tab: which side panel is open (log | bets | feed)
+  function setView(view, tab) {
+    if (view) { state.view = view; ls.set("gbg-view", view); }
+    if (tab) { state.tab = tab; ls.set("gbg-tab", tab); }
+    document.body.dataset.view = state.view;
+    document.body.dataset.tab = state.tab;
+    document.querySelectorAll(".tabs [data-tab]").forEach(b => b.classList.toggle("active", b.dataset.tab === state.tab));
+    document.querySelectorAll(".bottom-nav button").forEach(b =>
+      b.classList.toggle("active", b.dataset.view === state.view && (!b.dataset.tab || b.dataset.tab === state.tab)));
+  }
+
+  $(".tabs").addEventListener("click", e => {
+    const b = e.target.closest("[data-tab]");
+    if (b) setView(null, b.dataset.tab);
+  });
+  $(".bottom-nav").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    setView(b.dataset.view, b.dataset.tab);
+    window.scrollTo(0, 0);
+  });
+
   $("#unitBtn").addEventListener("click", () => {
     state.unit = state.unit === "mi" ? "km" : "mi";
     ls.set("gbg-unit", state.unit);
@@ -664,6 +694,7 @@
     $("#title").textContent = CFG.title;
     $("#routeName").textContent = `${CFG.route.name} · ${fmt(GOAL, 0)}`;
     document.title = CFG.title;
+    setView();
     setupForm();
     renderRules();
 
