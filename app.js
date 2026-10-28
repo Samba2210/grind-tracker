@@ -42,9 +42,16 @@
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const mult = t => CFG.multipliers[t] ?? 1;
   // golf is a flat bonus per win (stored as km: 1); everything else is distance x multiplier
-  const GOLF_WIN = CFG.golfWin ?? 3;
+  const GOLF_WIN = CFG.golfWin ?? 1;
   const points = a => TYPES[a.type]?.flat ? GOLF_WIN : a.km * mult(a.type);
+  const rate = t => TYPES[t].flat ? GOLF_WIN : mult(t);
   const typeRate = t => TYPES[t].flat ? `+${GOLF_WIN} KM` : `×${mult(t)}`;
+  // A bet's stake is in real km of its exercise (or wins, for golf), scaled like an activity.
+  // Bets from before exercise types were added have no type and count at face value.
+  const betValue = c => c.stake * (TYPES[c.type] ? rate(c.type) : 1);
+  const stakeText = c => TYPES[c.type]
+    ? `${TYPES[c.type].flat ? `${c.stake} WIN${c.stake === 1 ? "" : "S"}` : fmt(c.stake)} ${TYPES[c.type].icon}`
+    : fmt(c.stake);
   const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
   const safeImg = src => typeof src === "string" && src.startsWith("data:image/") ? src : null;
 
@@ -193,7 +200,7 @@
     state.challenges.forEach(c => {
       const winner = betWinner(c);
       if (!winner || (c.from !== id && c.to !== id)) return;
-      if (winner === id) { net += c.stake; wins++; } else net -= c.stake;
+      if (winner === id) { net += betValue(c); wins++; } else net -= betValue(c);
     });
     return { net, wins };
   }
@@ -216,7 +223,7 @@
       const { net: bets, wins: betWins } = betResults(p.id);
       pts += bets;
       const progress = Math.max(0, pts); // debt keeps you parked at Land's End
-      const bigBet = state.challenges.some(c => c.from === p.id && c.stake >= 10 && c.status !== "cancelled");
+      const bigBet = state.challenges.some(c => c.from === p.id && betValue(c) >= 10 && c.status !== "cancelled");
       const level = Math.floor(progress / CFG.kmPerLevel) + 1;
       const title = TITLES.filter(([l]) => level >= l).pop()[1];
       const pos = progress % GOAL;
@@ -537,7 +544,7 @@
           ${avatarHTML(w, "sm")}
           <div class="feed-body">
             <div>🎲 <b>${esc(w.name)}</b> won the bet vs <b style="color:${esc(l.color)}">${esc(l.name)}</b>
-              <span class="gain">+${c.stake.toFixed(1)}</span> <span class="loss">−${c.stake.toFixed(1)}</span></div>
+              <span class="gain">+${betValue(c).toFixed(1)}</span> <span class="loss">−${betValue(c).toFixed(1)}</span></div>
             <div class="feed-meta">${shortDate(localDate(c.resolvedAt || 0))} · “${esc(c.desc)}”${c.proof ? ` · ${esc(c.proof)}` : ""}</div>
           </div>
         </li>`;
@@ -567,7 +574,7 @@
 
   function challengeCard(c, P) {
     const f = P[c.from], t = P[c.to];
-    const stake = fmt(c.stake);
+    const stake = fmt(betValue(c));
     const overdue = c.deadline && c.deadline < today() && (c.status === "pending" || OPEN_BET.includes(c.status));
     const me = access.me, isTo = me === c.to, isFrom = me === c.from;
     const referee = access.admin && !isTo && !isFrom;
@@ -614,7 +621,7 @@
           <span class="ch-status">${status}</span>
           <span class="ch-stake">${stake}</span>
         </div>
-        <p class="ch-text"><b style="color:${esc(f.color)}">${esc(f.name)}</b> bets ${stake} that
+        <p class="ch-text"><b style="color:${esc(f.color)}">${esc(f.name)}</b> bets ${stakeText(c)}${TYPES[c.type] && rate(c.type) !== 1 ? ` (${stake})` : ""} that
           <b style="color:${esc(t.color)}">${esc(t.name)}</b> can't <q>${esc(c.desc)}</q></p>
         ${c.deadline || c.proof ? `<div class="ch-meta">${c.deadline ? `⏱ BY ${shortDate(c.deadline)}` : ""}${c.proof ? ` · PROOF: ${esc(c.proof)}` : ""}</div>` : ""}
         ${note ? `<div class="ch-note">${note}</div>` : ""}
@@ -965,12 +972,25 @@
   // ---------- challenges ----------
   let editingBet = null; // id of the bet the dialog is editing, or null for a new one
 
+  function updateBetPreview() {
+    const type = $("#cType").value, flat = !!TYPES[type]?.flat;
+    $("#cStakeLabel").textContent = flat ? "STAKE (WINS)" : "STAKE (KM)";
+    $("#cStake").step = flat ? "1" : "0.1";
+    $("#cStake").min = flat ? "1" : "0.1";
+    const v = parseFloat($("#cStake").value);
+    $("#cPreview").textContent = v > 0 ? `= ${fmt(v * rate(type))} ADJUSTED, WON OR LOST` : "";
+  }
+  ["input", "change"].forEach(ev => $("#chForm").addEventListener(ev, updateBetPreview));
+
   function openChallenge(bet = null) {
     editingBet = bet?.id || null;
     const opts = list => list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const from = $("#cFrom"), to = $("#cTo");
     from.innerHTML = opts(bet ? roster() : selectablePlayers());
     to.innerHTML = opts(roster());
+    $("#cType").innerHTML = Object.keys(TYPES).map(t =>
+      `<option value="${t}">${TYPES[t].icon} ${TYPES[t].label} (${typeRate(t)})</option>`).join("");
+    $("#cType").value = TYPES[bet?.type] ? bet.type : "run";
     if (bet) {
       from.value = bet.from;
       to.value = bet.to;
@@ -988,6 +1008,7 @@
     $("#chTitle").textContent = bet ? "EDIT CHALLENGE" : "ISSUE A CHALLENGE";
     $("#chSubmit").textContent = bet ? "✔ SAVE CHANGES" : "⚔ SEND CHALLENGE";
     $("#chRules").hidden = !!bet;
+    updateBetPreview();
     $("#chDlg").showModal();
   }
 
@@ -998,8 +1019,9 @@
     e.preventDefault();
     const from = $("#cFrom").value, to = $("#cTo").value;
     if (from === to) { toast("YOU CAN'T BET AGAINST YOURSELF", "bad"); return; }
+    const type = $("#cType").value;
     const v = parseFloat($("#cStake").value);
-    const stake = Math.round(v * 1000) / 1000;
+    const stake = TYPES[type].flat ? Math.round(v) : Math.round(v * 1000) / 1000;
     if (!(stake > 0)) { toast("STAKE MUST BE MORE THAN 0", "bad"); return; }
     const desc = $("#cDesc").value.trim().slice(0, 100);
     if (!desc) return;
@@ -1007,7 +1029,7 @@
     btn.disabled = true;
     if (editingBet) {
       try {
-        await state.store.updateChallenge(editingBet, { stake, desc, deadline: $("#cDeadline").value || "" });
+        await state.store.updateChallenge(editingBet, { type, stake, desc, deadline: $("#cDeadline").value || "" });
         $("#chDlg").close();
         toast("BET UPDATED", "good");
       } catch (err) {
@@ -1020,7 +1042,7 @@
     }
     try {
       await state.store.addChallenge({
-        from, to, stake, desc,
+        from, to, type, stake, desc,
         deadline: $("#cDeadline").value || "",
         status: "pending",
         createdAt: Date.now(),
@@ -1077,8 +1099,8 @@
     try {
       await state.store.updateChallenge(c.id, fields);
       if (act === "accept") toast(`${P[c.to].name} ACCEPTS! GAME ON`, "cp");
-      else if (fields.status === "completed") toast(`${P[c.to].name} WINS +${fmt(c.stake)}`, "good");
-      else if (fields.status === "failed") toast(`${P[c.from].name} WINS +${fmt(c.stake)}`, "good");
+      else if (fields.status === "completed") toast(`${P[c.to].name} WINS +${fmt(betValue(c))}`, "good");
+      else if (fields.status === "failed") toast(`${P[c.from].name} WINS +${fmt(betValue(c))}`, "good");
       else if (act === "claim") toast(`CLAIM SENT — WAITING FOR ${P[access.me === c.to ? c.from : c.to].name}`, "cp");
       else if (act === "dispute") toast("DISPUTED — THE ADMIN WILL SETTLE IT", "bad");
       else toast(act === "decline" ? "CHALLENGE DECLINED" : "BET CANCELLED");

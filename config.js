@@ -28,7 +28,7 @@ window.APP_CONFIG = {
   },
 
   // Adjusted km for each win at Golf with Friends (flat, no distance)
-  golfWin: 3,
+  golfWin: 1,
 
   // Adjusted km per level on the leaderboard
   kmPerLevel: 20,

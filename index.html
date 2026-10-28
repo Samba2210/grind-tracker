@@ -118,9 +118,13 @@
         <label class="field grow"><span>BETTOR (YOU)</span><select id="cFrom" required></select></label>
         <label class="field grow"><span>CALLING OUT</span><select id="cTo" required></select></label>
       </div>
-      <label class="field"><span>STAKE (KM)</span>
-        <input id="cStake" type="number" step="0.1" min="0.1" inputmode="decimal" placeholder="5" required>
-      </label>
+      <div class="row">
+        <label class="field grow"><span>EXERCISE</span><select id="cType"></select></label>
+        <label class="field grow"><span id="cStakeLabel">STAKE (KM)</span>
+          <input id="cStake" type="number" step="0.1" min="0.1" inputmode="decimal" placeholder="5" required>
+        </label>
+      </div>
+      <p class="preview" id="cPreview"></p>
       <label class="field"><span>THEY CAN'T…</span>
         <input id="cDesc" maxlength="100" placeholder="run a sub 31 min 5k" required>
       </label>

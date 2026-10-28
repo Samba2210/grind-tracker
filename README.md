@@ -2,7 +2,7 @@
 
 A retro-arcade exercise tracker for 4 mates racing (virtually) from **Land's End to John o' Groats** (~1,407 km).
 
-- Log runs, rides and swims; each gets a multiplier (cycle ×1, run ×4, swim ×16) so it's fair. A win at Golf with Friends is a flat +3 km
+- Log runs, rides and swims; each gets a multiplier (cycle ×1, run ×4, swim ×16) so it's fair. A win at Golf with Friends is a flat +1 km. Bets name an exercise too, and the stake is scaled by its multiplier
 - Profile pics act as markers on the map
 - Leaderboard with levels, titles, XP bars and badges
 - Finish the route → LAP 2

@@ -98,7 +98,8 @@ service cloud.firestore {
     }
 
     function validTerms(d) {
-      return d.stake is number && d.stake > 0 && d.stake <= 100000
+      return (!('type' in d) || d.type in ['run', 'cycle', 'swim', 'golf'])
+        && d.stake is number && d.stake > 0 && d.stake <= 100000
         && d.desc is string && d.desc.size() > 0 && d.desc.size() <= 100
         && d.deadline is string && d.deadline.size() <= 10;
     }
@@ -110,7 +111,7 @@ service cloud.firestore {
     match /challenges/{id} {
       allow read: if true;
       allow create: if (isAdmin() || isPlayer(request.resource.data.from))
-        && request.resource.data.keys().hasOnly(['from', 'to', 'stake', 'desc', 'deadline', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['from', 'to', 'type', 'stake', 'desc', 'deadline', 'status', 'createdAt'])
         && request.resource.data.from in players()
         && request.resource.data.to in players()
         && request.resource.data.from != request.resource.data.to
@@ -119,7 +120,7 @@ service cloud.firestore {
       allow update: if (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claim', 'claimedBy', 'proof', 'resolvedAt'])
           && (!('proof' in request.resource.data) || (request.resource.data.proof is string && request.resource.data.proof.size() <= 60))
           && ((isMember() && partyMove()) || refereeMove()))
-        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stake', 'desc', 'deadline'])
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['type', 'stake', 'desc', 'deadline'])
           && validTerms(request.resource.data) && canEditBet());
       allow delete: if canEditBet();
     }
