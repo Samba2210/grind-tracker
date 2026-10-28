@@ -20,7 +20,6 @@
     </div>
     <div class="top-actions">
       <span id="mode" class="pill">CONNECTING…</span>
-      <button id="unitBtn" class="btn ghost" type="button" title="Toggle units">MI</button>
       <button id="squadBtn" class="btn ghost" type="button">EDIT SQUAD</button>
     </div>
   </header>
@@ -58,14 +57,9 @@
       <form id="logForm" autocomplete="off">
         <label class="field"><span>PLAYER</span><select id="fPlayer" required></select></label>
         <div class="field"><span>CLASS</span><div class="types" id="fTypes"></div></div>
-        <div class="row">
-          <label class="field grow"><span>DISTANCE</span>
-            <input id="fDist" type="number" step="0.01" min="0.01" max="1000" inputmode="decimal" placeholder="5.0" required>
-          </label>
-          <label class="field"><span>UNIT</span>
-            <select id="fUnit"><option value="km">KM</option><option value="mi">MI</option></select>
-          </label>
-        </div>
+        <label class="field"><span>DISTANCE (KM)</span>
+          <input id="fDist" type="number" step="0.01" min="0.01" max="1000" inputmode="decimal" placeholder="5.0" required>
+        </label>
         <div class="row">
           <label class="field date-field"><span>DATE</span><input id="fDate" type="date" required></label>
           <label class="field grow"><span>NOTE <em>(OPTIONAL)</em></span><input id="fNote" maxlength="80" placeholder="Brutal hills"></label>
@@ -119,19 +113,14 @@
         <label class="field grow"><span>BETTOR (YOU)</span><select id="cFrom" required></select></label>
         <label class="field grow"><span>CALLING OUT</span><select id="cTo" required></select></label>
       </div>
-      <div class="row">
-        <label class="field grow"><span>STAKE</span>
-          <input id="cStake" type="number" step="0.1" min="0.1" max="50" inputmode="decimal" placeholder="5" required>
-        </label>
-        <label class="field"><span>UNIT</span>
-          <select id="cUnit"><option value="km">KM</option><option value="mi">MI</option></select>
-        </label>
-      </div>
+      <label class="field"><span>STAKE (KM) · <b class="cap" id="cCap"></b></span>
+        <input id="cStake" type="number" step="0.1" min="0.1" max="5" inputmode="decimal" placeholder="5" required>
+      </label>
       <label class="field"><span>THEY CAN'T…</span>
         <input id="cDesc" maxlength="100" placeholder="run a sub 31 min 5k" required>
       </label>
       <label class="field"><span>DEADLINE <em>(OPTIONAL)</em></span><input id="cDeadline" type="date"></label>
-      <p class="ch-rules">If they do it, <b>they win</b> the stake from you. If they fail, <b>you win</b> it from them. They have to accept first.</p>
+      <p class="ch-rules">If they do it, <b>they win</b> the stake from you. If they fail, <b>you win</b> it from them. They have to accept first. Stakes are capped at the lower of your two totals (always at least 5 km), and losing can put you in debt.</p>
       <button class="btn primary big" type="submit">⚔ SEND CHALLENGE</button>
     </form>
   </dialog>

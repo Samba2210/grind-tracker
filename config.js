@@ -41,7 +41,7 @@ window.APP_CONFIG = {
     { id: "p4", name: "PLAYER 4", color: "#ffb800", team: "t2" },
   ],
 
-  // The route: Land's End -> John o' Groats (~1,407 km / 874 mi by road).
+  // The route: Land's End -> John o' Groats (~1,407 km by road).
   // Finish it and you start LAP 2.
   route: {
     name: "LAND'S END ➜ JOHN O' GROATS",

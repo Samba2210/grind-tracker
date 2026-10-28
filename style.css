@@ -207,6 +207,9 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .badge { font-size: 7px; padding: 4px 5px; border: 1px solid var(--lime); color: var(--lime); cursor: help; }
 .score { font-size: 15px; text-align: right; color: #fff; text-shadow: 0 0 10px var(--c); }
+.score.neg { color: var(--red); text-shadow: 0 0 10px var(--red); }
+.debtchip { font-family: var(--pixel); font-size: 8px; padding: 4px 5px; background: var(--red); color: #fff; animation: blink 1.4s steps(2) infinite; }
+.cap { color: var(--amber); font-weight: 400; }
 .score small { display: block; font-size: 8px; color: var(--dim); margin-top: 4px; text-shadow: none; }
 
 @media (max-width: 560px) {

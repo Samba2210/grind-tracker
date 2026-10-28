@@ -1,12 +1,12 @@
 # The Great British Grind 🏃🚴🏊
 
-A retro-arcade exercise tracker for 4 mates racing (virtually) from **Land's End to John o' Groats** (~1,407 km / 874 mi).
+A retro-arcade exercise tracker for 4 mates racing (virtually) from **Land's End to John o' Groats** (~1,407 km).
 
 - Log runs, rides and swims; each gets a multiplier (run ×1, cycle ×0.3, swim ×4) so it's fair
 - Profile pics act as markers on the map
 - Leaderboard with levels, titles, XP bars and badges
 - Finish the route → LAP 2
-- Toggle miles / km
+- Teams, and challenges: bet km that a mate can't hit a target. Winner takes the stake, and losers can go into debt
 
 Tweak multipliers, player defaults and checkpoints in `config.js`.
 

@@ -3,7 +3,6 @@
 
   const CFG = window.APP_CONFIG;
   const GOAL = CFG.route.totalKm;
-  const KM_PER_MI = 1.609344;
   const FIREBASE_VERSION = "10.12.2";
 
   const TYPES = {
@@ -29,7 +28,10 @@
     { id: "roll",   label: "HIGH ROLLER", tip: "Staked 10 km+ on a challenge", test: s => s.bigBet },
   ];
 
+  // A stake can't exceed the lower of the two players' totals (so nobody gets wiped out early),
+  // but small bets are always allowed. Losses can push a total below zero: that's debt.
   const MAX_STAKE_KM = 50;
+  const MIN_STAKE_CAP_KM = 5;
 
   // ---------- helpers ----------
   const $ = (s, el = document) => el.querySelector(s);
@@ -44,7 +46,6 @@
   const safeImg = src => typeof src === "string" && src.startsWith("data:image/") ? src : null;
 
   const state = {
-    unit: ls.get("gbg-unit", "mi"),
     view: ["home", "side", "map"].includes(ls.get("gbg-view")) ? ls.get("gbg-view") : "home",
     tab: ["log", "bets", "feed"].includes(ls.get("gbg-tab")) ? ls.get("gbg-tab") : "log",
     players: {},      // overrides from store
@@ -54,8 +55,7 @@
     store: null,
   };
 
-  const toUnit = km => state.unit === "mi" ? km / KM_PER_MI : km;
-  const fmt = (km, dp = 1) => `${toUnit(km).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })} ${state.unit.toUpperCase()}`;
+  const fmt = (km, dp = 1) => `${km.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })} KM`;
 
   // ---------- stores ----------
   function localStore() {
@@ -165,16 +165,18 @@
       let pts = 0;
       acts.forEach(a => { raw[a.type] += a.km; pts += a.km * mult(a.type); });
       const { net: bets, wins: betWins } = betResults(p.id);
-      pts = Math.max(0, pts + bets);
+      pts += bets;
+      const progress = Math.max(0, pts); // debt keeps you parked at Land's End
       const bigBet = state.challenges.some(c => c.from === p.id && c.stake >= 10 && c.status !== "cancelled");
-      const level = Math.floor(pts / CFG.kmPerLevel) + 1;
+      const level = Math.floor(progress / CFG.kmPerLevel) + 1;
       const title = TITLES.filter(([l]) => level >= l).pop()[1];
-      const pos = pts % GOAL;
+      const pos = progress % GOAL;
       const next = CFG.route.checkpoints.find(c => c.km > pos);
       return {
         ...p, acts, raw, pts, bets, level, title,
-        xp: (pts % CFG.kmPerLevel) / CFG.kmPerLevel,
-        lap: Math.floor(pts / GOAL) + 1,
+        debt: pts < 0,
+        xp: (progress % CFG.kmPerLevel) / CFG.kmPerLevel,
+        lap: Math.floor(progress / GOAL) + 1,
         pos, next,
         badges: BADGES.filter(b => b.test({ acts, raw, pts, betWins, bigBet })),
       };
@@ -182,6 +184,7 @@
   }
 
   const passedCheckpoints = pts => {
+    pts = Math.max(0, pts);
     const lap = Math.floor(pts / GOAL);
     return lap * CFG.route.checkpoints.length + CFG.route.checkpoints.filter(c => c.km <= pts % GOAL).length;
   };
@@ -199,20 +202,22 @@
     $("#squadTotal").textContent = `SQUAD: ${fmt(squad, 0)}`;
     $("#board").innerHTML = stats.map((p, i) => {
       const raw = Object.keys(TYPES).map(t =>
-        `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${toUnit(p.raw[t]).toFixed(1)}</span>`).join("") +
-        (p.bets ? `<span class="${p.bets > 0 ? "up" : "down"}" title="Challenge winnings">🎲 ${p.bets > 0 ? "+" : ""}${toUnit(p.bets).toFixed(1)}</span>` : "");
-      const nextTxt = p.next ? `NEXT: ${esc(p.next.name)} in ${fmt(p.next.km - p.pos, 0)}` : "";
+        `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${p.raw[t].toFixed(1)}</span>`).join("") +
+        (p.bets ? `<span class="${p.bets > 0 ? "up" : "down"}" title="Challenge winnings">🎲 ${p.bets > 0 ? "+" : ""}${p.bets.toFixed(1)}</span>` : "");
+      const nextTxt = p.debt
+        ? `IN DEBT: run off ${fmt(-p.pts)} to get moving`
+        : p.next ? `NEXT: ${esc(p.next.name)} in ${fmt(p.next.km - p.pos, 0)}` : "";
       return `
         <li class="entry ${p.pts > 0 ? `rank-${i + 1}` : ""}" style="--c:${esc(p.color)}">
           <div class="rank">${i + 1}</div>
           ${avatarHTML(p, "lg")}
           <div class="info">
-            <div class="name">${esc(p.name)} ${teamChip(p.teamInfo)}<span class="lvl">LV ${p.level}</span><span class="ptitle">${p.title}</span>${p.lap > 1 ? `<span class="lapchip">LAP ${p.lap}</span>` : ""}</div>
+            <div class="name">${esc(p.name)} ${teamChip(p.teamInfo)}<span class="lvl">LV ${p.level}</span><span class="ptitle">${p.title}</span>${p.lap > 1 ? `<span class="lapchip">LAP ${p.lap}</span>` : ""}${p.debt ? `<span class="debtchip">IN DEBT</span>` : ""}</div>
             <div class="xp" title="${Math.round(p.xp * 100)}% to LV ${p.level + 1}"><i style="width:${(p.xp * 100).toFixed(1)}%"></i></div>
             <div class="meta">${raw}<span class="next">${nextTxt}</span></div>
             ${p.badges.length ? `<div class="badges">${p.badges.map(b => `<span class="badge" title="${esc(b.tip)}">${b.label}</span>`).join("")}</div>` : ""}
           </div>
-          <div class="score">${toUnit(p.pts).toFixed(1)}<small>${state.unit.toUpperCase()}</small></div>
+          <div class="score ${p.debt ? "neg" : ""}">${p.pts.toFixed(1)}<small>KM</small></div>
         </li>`;
     }).join("");
   }
@@ -221,7 +226,7 @@
     const panel = $("#teamsPanel");
     panel.hidden = teams.length < 2;
     if (panel.hidden) return;
-    const total = teams.reduce((s, t) => s + t.pts, 0);
+    const total = teams.reduce((s, t) => s + Math.max(0, t.pts), 0);
     const leading = teams[0].pts > teams[1].pts;
     // keep config order in the tug bar so it doesn't flip sides when the lead changes
     const ordered = [...teams].sort((a, b) => CFG.teams.findIndex(t => t.id === a.id) - CFG.teams.findIndex(t => t.id === b.id));
@@ -229,12 +234,13 @@
       `<i style="--t:${esc(t.color)};flex-grow:${total ? Math.max(t.pts, total * 0.04) : 1}"></i>`).join("");
     const cards = ordered.map(t => {
       const lead = leading && t.id === teams[0].id;
-      const pos = t.pts % GOAL, lap = Math.floor(t.pts / GOAL) + 1;
+      const progress = Math.max(0, t.pts);
+      const pos = progress % GOAL, lap = Math.floor(progress / GOAL) + 1;
       const next = CFG.route.checkpoints.find(c => c.km > pos);
       return `
         <div class="team-card ${lead ? "lead" : ""}" style="--t:${esc(t.color)}">
           <div class="team-name">${lead ? "♛ " : ""}${esc(t.name)}</div>
-          <div class="team-score">${toUnit(t.pts).toFixed(1)}<small>${state.unit.toUpperCase()}</small></div>
+          <div class="team-score">${t.pts.toFixed(1)}<small>KM</small></div>
           <div class="team-members">${t.members.map(m => avatarHTML(m, "sm")).join("") || `<span class="dim">NO PLAYERS</span>`}</div>
           <div class="team-prog"><i style="width:${(pos / GOAL * 100).toFixed(1)}%"></i></div>
           <div class="team-meta">${lap > 1 ? `LAP ${lap} · ` : ""}${next ? `NEXT: ${esc(next.name)} in ${fmt(next.km - pos, 0)}` : ""}</div>
@@ -299,7 +305,7 @@
           ${avatarHTML(w, "sm")}
           <div class="feed-body">
             <div>🎲 <b>${esc(w.name)}</b> won the bet vs <b style="color:${esc(l.color)}">${esc(l.name)}</b>
-              <span class="gain">+${toUnit(c.stake).toFixed(1)}</span> <span class="loss">−${toUnit(c.stake).toFixed(1)}</span></div>
+              <span class="gain">+${c.stake.toFixed(1)}</span> <span class="loss">−${c.stake.toFixed(1)}</span></div>
             <div class="feed-meta">${shortDate(localDate(c.resolvedAt || 0))} · “${esc(c.desc)}”${c.proof ? ` · ${esc(c.proof)}` : ""}</div>
           </div>
         </li>`;
@@ -311,7 +317,7 @@
           ${avatarHTML(p, "sm")}
           <div class="feed-body">
             <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb} ${fmt(a.km)} ${TYPES[a.type].icon}
-              <span class="gain">+${toUnit(a.km * mult(a.type)).toFixed(1)}</span></div>
+              <span class="gain">+${(a.km * mult(a.type)).toFixed(1)}</span></div>
             <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}</div>
           </div>
           <button class="del" data-id="${esc(a.id)}" type="button" title="Delete">✕</button>
@@ -389,7 +395,6 @@
 
   function render() {
     const stats = computeStats();
-    $("#unitBtn").textContent = state.unit.toUpperCase();
     renderTeams(computeTeams(stats));
     renderBoard(stats);
     renderTrack(stats);
@@ -422,8 +427,7 @@
   function updatePreview() {
     const v = parseFloat($("#fDist").value);
     if (!(v > 0)) { $("#preview").textContent = ""; return; }
-    const km = $("#fUnit").value === "mi" ? v * KM_PER_MI : v;
-    $("#preview").textContent = `= +${fmt(km * mult(selectedType()))} ADJUSTED`;
+    $("#preview").textContent = `= +${fmt(v * mult(selectedType()))} ADJUSTED`;
   }
 
   function resizeImage(file, size = 160) {
@@ -510,7 +514,6 @@
         <span><i>${TYPES[t].icon}</i>${TYPES[t].label}<small>×${mult(t)}</small></span></label>`).join("");
     $("#fDate").value = today();
     $("#fDate").max = today();
-    $("#fUnit").value = state.unit;
     ["input", "change"].forEach(ev => $("#logForm").addEventListener(ev, updatePreview));
 
     $("#logForm").addEventListener("submit", async e => {
@@ -519,7 +522,7 @@
       const type = selectedType();
       const v = parseFloat($("#fDist").value);
       if (!(v > 0)) return;
-      const km = Math.round(($("#fUnit").value === "mi" ? v * KM_PER_MI : v) * 1000) / 1000;
+      const km = Math.round(v * 1000) / 1000;
 
       const statsBefore = computeStats();
       const before = statsBefore.find(s => s.id === playerId);
@@ -573,18 +576,32 @@
   });
 
   // ---------- challenges ----------
+  function stakeCap(a, b) {
+    const stats = computeStats();
+    const pts = id => stats.find(s => s.id === id)?.pts || 0;
+    return Math.floor(Math.min(MAX_STAKE_KM, Math.max(MIN_STAKE_CAP_KM, Math.min(pts(a), pts(b)))) * 10) / 10;
+  }
+
+  function updateStakeCap() {
+    const cap = stakeCap($("#cFrom").value, $("#cTo").value);
+    $("#cStake").max = cap;
+    $("#cCap").textContent = `MAX ${fmt(cap)}`;
+  }
+
   function openChallenge() {
     const opts = roster().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const from = $("#cFrom"), to = $("#cTo");
     from.innerHTML = to.innerHTML = opts;
     from.value = ls.get("gbg-last-player", CFG.players[0].id);
     to.value = CFG.players.find(p => p.id !== from.value).id;
-    $("#cUnit").value = state.unit;
     $("#cDeadline").min = today();
+    updateStakeCap();
     $("#chDlg").showModal();
   }
 
   $("#chBtn").addEventListener("click", openChallenge);
+  $("#cFrom").addEventListener("change", updateStakeCap);
+  $("#cTo").addEventListener("change", updateStakeCap);
   $("#chClose").addEventListener("click", () => $("#chDlg").close());
 
   $("#chForm").addEventListener("submit", async e => {
@@ -592,8 +609,9 @@
     const from = $("#cFrom").value, to = $("#cTo").value;
     if (from === to) { toast("YOU CAN'T BET AGAINST YOURSELF", "bad"); return; }
     const v = parseFloat($("#cStake").value);
-    const stake = Math.round(($("#cUnit").value === "mi" ? v * KM_PER_MI : v) * 1000) / 1000;
-    if (!(stake > 0) || stake > MAX_STAKE_KM) { toast(`STAKE MUST BE 0–${fmt(MAX_STAKE_KM, 0)}`, "bad"); return; }
+    const stake = Math.round(v * 1000) / 1000;
+    const cap = stakeCap(from, to);
+    if (!(stake > 0) || stake > cap) { toast(`STAKE MUST BE 0.1–${fmt(cap)}`, "bad"); return; }
     const desc = $("#cDesc").value.trim().slice(0, 100);
     if (!desc) return;
     const btn = e.submitter || $("#chForm button[type=submit]");
@@ -681,12 +699,6 @@
     window.scrollTo(0, 0);
   });
 
-  $("#unitBtn").addEventListener("click", () => {
-    state.unit = state.unit === "mi" ? "km" : "mi";
-    ls.set("gbg-unit", state.unit);
-    $("#fUnit").value = state.unit;
-    render();
-  });
   $("#squadBtn").addEventListener("click", openSquad);
 
   // ---------- boot ----------
