@@ -246,31 +246,44 @@
     $("#teams").innerHTML = `<div class="tug">${tug}</div><div class="team-cards">${cards.join(`<div class="vs">VS</div>`)}</div>`;
   }
 
+  // The bottom slice of the map is the sea off Land's End. Anyone in debt sinks into it,
+  // deeper the more they owe (the biggest debtor, or 10 km of debt, sits on the sea bed).
+  const OCEAN_PCT = 15;
+
   function renderTrack(stats) {
-    const pct = km => (km / GOAL) * 100;
-    let html = "";
+    const pct = km => OCEAN_PCT + (km / GOAL) * (100 - OCEAN_PCT);
+    const debtors = stats.filter(p => p.debt);
+    const deepest = Math.max(10, ...debtors.map(p => -p.pts));
+    const depthPct = p => OCEAN_PCT - 4 - (-p.pts / deepest) * (OCEAN_PCT - 8);
+
+    let html = `
+      <div class="ocean" style="height:${OCEAN_PCT}%">
+        <span>THE ATLANTIC</span>
+        ${debtors.length ? `<i class="shark" aria-hidden="true">🦈</i>` : ""}
+      </div>`;
     CFG.route.zones.forEach((z, i) => {
-      html += `<div class="zone z${i}" style="bottom:${pct(z.fromKm)}%;height:${pct(z.toKm - z.fromKm)}%"><span>${esc(z.name)}</span></div>`;
+      html += `<div class="zone z${i}" style="bottom:${pct(z.fromKm)}%;height:${pct(z.toKm) - pct(z.fromKm)}%"><span>${esc(z.name)}</span></div>`;
     });
-    html += `<div class="rail"></div>`;
+    html += `<div class="rail" style="bottom:${OCEAN_PCT}%"></div>`;
     const leader = stats[0];
-    if (leader) html += `<div class="rail-fill" style="height:${pct(Math.min(leader.pts, GOAL))}%"></div>`;
+    if (leader) html += `<div class="rail-fill" style="bottom:${OCEAN_PCT}%;height:${pct(Math.min(Math.max(0, leader.pts), GOAL)) - OCEAN_PCT}%"></div>`;
     CFG.route.checkpoints.forEach((c, i, arr) => {
       const cls = i === 0 ? "start" : i === arr.length - 1 ? "finish" : "";
       html += `<div class="cp ${cls}" style="bottom:${pct(c.km)}%"><span class="cp-dot"></span><span class="cp-label">${esc(c.name)}<small>${fmt(c.km, 0)}</small></span></div>`;
     });
 
     // markers: cluster nearby players side-by-side
-    const sorted = [...stats].sort((a, b) => a.pos - b.pos);
+    // markers closer than one marker-height apart sit side-by-side (the map is hidden on some phone tabs, so fall back to 600px)
+    const near = 62 / ($("#track").clientHeight || 600) * 100;
+    const placed = stats.map(p => ({ p, at: p.debt ? depthPct(p) : pct(p.pos) })).sort((a, b) => a.at - b.at);
     let clusterStart = -99, off = 0;
-    sorted.forEach(p => {
-      const at = pct(p.pos);
-      if (at - clusterStart < 5) off++; else { clusterStart = at; off = 0; }
+    placed.forEach(({ p, at }) => {
+      if (at - clusterStart < near) off++; else { clusterStart = at; off = 0; }
       html += `
-        <div class="marker" style="bottom:${at}%;--off:${off};--c:${esc(p.color)};--t:${esc(p.teamInfo?.color || p.color)}" title="${esc(p.name)}${p.teamInfo ? ` (${esc(p.teamInfo.name)})` : ""}: ${fmt(p.pts)}">
+        <div class="marker ${p.debt ? "sunk" : ""}" style="bottom:${at}%;--off:${off};--c:${esc(p.color)};--t:${esc(p.teamInfo?.color || p.color)}" title="${esc(p.name)}${p.teamInfo ? ` (${esc(p.teamInfo.name)})` : ""}: ${fmt(p.pts)}${p.debt ? " (IN DEBT)" : ""}">
           ${avatarHTML(p)}
           ${p.lap > 1 ? `<span class="lap">L${p.lap}</span>` : ""}
-          <span class="mk-name">${esc(p.name)}</span>
+          <span class="mk-name">${p.debt ? p.pts.toFixed(1) : esc(p.name)}</span>
         </div>`;
     });
     $("#track").innerHTML = html;
@@ -677,6 +690,7 @@
     const b = e.target.closest("button");
     if (!b) return;
     setView(b.dataset.view, b.dataset.tab);
+    if (b.dataset.view === "map") renderTrack(computeStats()); // re-space markers now the map has a real height
     window.scrollTo(0, 0);
   });
 

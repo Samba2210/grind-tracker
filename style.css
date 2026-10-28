@@ -327,7 +327,27 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .mk-name { font-family: var(--pixel); font-size: 7px; color: var(--c); background: rgba(0,0,0,.75); padding: 2px 3px; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marker .lap { position: absolute; top: -8px; right: -10px; font-family: var(--pixel); font-size: 7px; padding: 2px 3px; background: var(--amber); color: #000; }
 @keyframes bob { 50% { translate: 0 -3px; } }
-@media (prefers-reduced-motion: reduce) { .marker { animation: none; } }
+
+.ocean {
+  position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden;
+  background: linear-gradient(180deg, rgba(0, 140, 255, .28), rgba(0, 25, 90, .75));
+  border-top: 2px solid rgba(0, 200, 255, .55);
+}
+.ocean::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px;
+  background: repeating-linear-gradient(90deg, rgba(0, 240, 255, .65) 0 8px, transparent 8px 16px);
+  animation: waves 1.6s linear infinite;
+}
+@keyframes waves { to { background-position: 16px 0; } }
+.ocean span { position: absolute; left: 8px; bottom: 6px; font-family: var(--pixel); font-size: 7px; color: rgba(0, 240, 255, .7); }
+.shark { position: absolute; bottom: 18%; font-style: normal; font-size: 22px; animation: swim 11s linear infinite; }
+@keyframes swim { from { left: 100%; } to { left: -40px; } }
+.marker.sunk { animation: sink-bob 3s ease-in-out infinite; }
+.marker.sunk .avatar { filter: saturate(.6) brightness(.85); }
+.marker.sunk .mk-name { background: var(--red); color: #fff; }
+@keyframes sink-bob { 50% { translate: 0 4px; rotate: -5deg; } }
+
+@media (prefers-reduced-motion: reduce) { .marker, .ocean::before, .shark { animation: none; } }
 
 /* ---------- form ---------- */
 form { display: grid; gap: 12px; }
