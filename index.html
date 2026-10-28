@@ -20,7 +20,9 @@
     </div>
     <div class="top-actions">
       <span id="mode" class="pill">CONNECTING…</span>
-      <button id="squadBtn" class="btn ghost" type="button">EDIT SQUAD</button>
+      <button id="role" class="pill role" type="button" hidden></button>
+      <button id="squadBtn" class="btn ghost" type="button" hidden>EDIT SQUAD</button>
+      <button id="authBtn" class="btn primary" type="button" hidden>SIGN IN</button>
     </div>
   </header>
 
@@ -54,7 +56,8 @@
 
     <section class="panel area-log" data-panel="log">
       <div class="panel-head"><h2>LOG A QUEST</h2></div>
-      <form id="logForm" autocomplete="off">
+      <div class="gate" id="logGate" hidden></div>
+      <form id="logForm" autocomplete="off" hidden>
         <label class="field"><span>PLAYER</span><select id="fPlayer" required></select></label>
         <div class="field"><span>CLASS</span><div class="types" id="fTypes"></div></div>
         <label class="field"><span>DISTANCE (KM)</span>
@@ -75,7 +78,8 @@
         <h2>CHALLENGES</h2>
         <span class="squad-total" id="chCount"></span>
       </div>
-      <button class="btn primary big" id="chBtn" type="button">⚔ ISSUE A CHALLENGE</button>
+      <div class="gate" id="betGate" hidden></div>
+      <button class="btn primary big" id="chBtn" type="button" hidden>⚔ ISSUE A CHALLENGE</button>
       <div id="challenges" class="challenges"></div>
     </section>
 
@@ -96,7 +100,8 @@
 
   <dialog id="squadDlg" class="dlg">
     <form method="dialog" class="dlg-inner" id="squadForm">
-      <div class="panel-head"><h2>EDIT SQUAD</h2><button class="btn ghost" value="cancel" type="submit">✕</button></div>
+      <div class="panel-head"><h2 id="squadTitle">EDIT SQUAD</h2><button class="btn ghost" value="cancel" type="submit">✕</button></div>
+      <div id="accounts" class="accounts" hidden></div>
       <div id="teamEdit" class="team-edits"></div>
       <div id="squadCards" class="squad-cards"></div>
       <div class="dlg-actions">
@@ -123,6 +128,15 @@
       <p class="ch-rules">If they do it, <b>they win</b> the stake from you. If they fail, <b>you win</b> it from them. They have to accept first. No limits: losing can put you in debt.</p>
       <button class="btn primary big" type="submit">⚔ SEND CHALLENGE</button>
     </form>
+  </dialog>
+
+  <dialog id="claimDlg" class="dlg dlg-narrow">
+    <div class="dlg-inner">
+      <div class="panel-head"><h2>CHOOSE YOUR PLAYER</h2><button class="btn ghost" id="claimClose" type="button">✕</button></div>
+      <p class="ch-rules">Pick the slot that's you. It gets locked to your Google account, so only you can log as that player. If you pick the wrong one, ask the admin to reset it.</p>
+      <div id="claimList" class="claim-list"></div>
+      <p class="ch-rules" id="claimEmpty" hidden>All slots are taken. Ask the admin to reset one if this is a mistake.</p>
+    </div>
   </dialog>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>

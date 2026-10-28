@@ -17,6 +17,9 @@ window.APP_CONFIG = {
     appId: "1:258860846223:web:aac581018f41f58e8ef4fa",
   },
 
+  // Firebase account IDs (uids) with the admin role. Must match the isAdmin() list in firestore.rules.
+  admins: [],
+
   // Adjusted km earned per real km. Tweak to keep it fair.
   multipliers: {
     run: 1,

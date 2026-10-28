@@ -1,32 +1,108 @@
 rules_version = '2';
+
+// Roles
+//   viewer: anyone, signed in or not. Read-only.
+//   player: a signed-in account that has claimed one player slot (members/{uid}). Can only act as that player.
+//   admin:  a uid listed in isAdmin(). Can do anything, and referees bets they aren't part of.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Player profiles (name, colour, small avatar image)
-    match /players/{id} {
+    function players() { return ['p1', 'p2', 'p3', 'p4']; }
+    function signedIn() { return request.auth != null; }
+    // Keep in sync with `admins` in config.js
+    function isAdmin() { return signedIn() && request.auth.uid in []; }
+    function memberDoc() { return /databases/$(database)/documents/members/$(request.auth.uid); }
+    function isMember() { return signedIn() && exists(memberDoc()); }
+    function myPlayer() { return get(memberDoc()).data.playerId; }
+    function isPlayer(playerId) { return isMember() && myPlayer() == playerId; }
+
+    // Which account owns which player slot. Claims and members are written together in one batch.
+    match /claims/{playerId} {
       allow read: if true;
-      allow write: if id in ['p1', 'p2', 'p3', 'p4']
-        && request.resource.data.keys().hasOnly(['name', 'color', 'avatar', 'team'])
-        && (!('team' in request.resource.data) || request.resource.data.team in ['t1', 't2'])
-        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 16))
-        && (!('avatar' in request.resource.data) || (request.resource.data.avatar is string && request.resource.data.avatar.size() < 200000));
+      allow create: if signedIn() && playerId in players()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && !exists(memberDoc())
+        && getAfter(memberDoc()).data.playerId == playerId;
+      allow delete: if isAdmin();
     }
 
-    // Teams (name, colour)
+    match /members/{uid} {
+      allow read: if true;
+      allow create: if signedIn() && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['playerId'])
+        && request.resource.data.playerId in players()
+        && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.playerId)).data.uid == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // Player profiles (name, colour, small avatar image, team). Players edit their own; only the admin moves teams.
+    function validPlayer() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['name', 'color', 'avatar', 'team'])
+        && (!('team' in d) || d.team in ['t1', 't2'])
+        && (!('name' in d) || (d.name is string && d.name.size() <= 16))
+        && (!('color' in d) || (d.color is string && d.color.size() <= 9))
+        && (!('avatar' in d) || (d.avatar is string && d.avatar.size() < 200000));
+    }
+    match /players/{id} {
+      allow read: if true;
+      allow create: if id in players() && validPlayer()
+        && (isAdmin() || (isPlayer(id) && !('team' in request.resource.data)));
+      allow update: if validPlayer()
+        && (isAdmin() || (isPlayer(id) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'avatar'])));
+    }
+
+    // Teams (name, colour): admin only
     match /teams/{id} {
       allow read: if true;
-      allow write: if id in ['t1', 't2']
+      allow write: if isAdmin() && id in ['t1', 't2']
         && request.resource.data.keys().hasOnly(['name', 'color'])
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 20;
     }
 
     // Challenges (bets between players)
+    //   pending  -> active / declined        (the challenged player)
+    //   pending  -> cancelled                (the bettor)
+    //   active   -> settled for the opponent (either player can concede straight away)
+    //   active   -> claimed                  (a player claims a win for themselves...)
+    //   claimed  -> confirmed or disputed    (...and the other player confirms or disputes it)
+    //   disputed -> settled for the opponent (either player can back down)
+    //   The admin can referee any bet they're not part of.
+    function moved(from, to) { return resource.data.status == from && request.resource.data.status == to; }
+    function settledFrom(list, to) { return resource.data.status in list && request.resource.data.status == to; }
+
+    function partyMove() {
+      let me = myPlayer();
+      let c = resource.data;
+      let d = request.resource.data;
+      let isTo = me == c.to;
+      let isFrom = me == c.from;
+      return (isTo && (moved('pending', 'active') || moved('pending', 'declined')))
+        || (isFrom && moved('pending', 'cancelled'))
+        || (isTo && settledFrom(['active', 'disputed'], 'failed'))
+        || (isFrom && settledFrom(['active', 'disputed'], 'completed'))
+        || (moved('active', 'claimed') && d.claimedBy == me
+            && ((isTo && d.claim == 'completed') || (isFrom && d.claim == 'failed')))
+        || ((isTo || isFrom) && c.status == 'claimed' && c.claimedBy != me
+            && (d.status == c.claim || d.status == 'disputed'));
+    }
+
+    function refereeMove() {
+      let c = resource.data;
+      let to = request.resource.data.status;
+      return isAdmin() && !(isMember() && myPlayer() in [c.from, c.to])
+        && ((c.status == 'pending' && to in ['active', 'declined', 'cancelled'])
+          || (c.status in ['active', 'claimed', 'disputed'] && to in ['completed', 'failed', 'cancelled']));
+    }
+
     match /challenges/{id} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['from', 'to', 'stake', 'desc', 'deadline', 'status', 'createdAt'])
-        && request.resource.data.from in ['p1', 'p2', 'p3', 'p4']
-        && request.resource.data.to in ['p1', 'p2', 'p3', 'p4']
+      allow create: if (isAdmin() || isPlayer(request.resource.data.from))
+        && request.resource.data.keys().hasOnly(['from', 'to', 'stake', 'desc', 'deadline', 'status', 'createdAt'])
+        && request.resource.data.from in players()
+        && request.resource.data.to in players()
         && request.resource.data.from != request.resource.data.to
         && request.resource.data.stake is number
         && request.resource.data.stake > 0
@@ -37,18 +113,17 @@ service cloud.firestore {
         && request.resource.data.deadline is string
         && request.resource.data.deadline.size() <= 10
         && request.resource.data.status == 'pending';
-      // only status moves forward: pending -> active/declined/cancelled, active -> completed/failed
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'proof', 'resolvedAt'])
-        && ((resource.data.status == 'pending' && request.resource.data.status in ['active', 'declined', 'cancelled'])
-          || (resource.data.status == 'active' && request.resource.data.status in ['completed', 'failed']))
-        && (!('proof' in request.resource.data) || (request.resource.data.proof is string && request.resource.data.proof.size() <= 60));
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claim', 'claimedBy', 'proof', 'resolvedAt'])
+        && (!('proof' in request.resource.data) || (request.resource.data.proof is string && request.resource.data.proof.size() <= 60))
+        && ((isMember() && partyMove()) || refereeMove());
       allow delete: if false;
     }
 
-    // Activities
+    // Activities: players log and delete their own; the admin can do anyone's
     match /activities/{id} {
-      allow read, delete: if true;
-      allow create: if request.resource.data.playerId in ['p1', 'p2', 'p3', 'p4']
+      allow read: if true;
+      allow create: if (isAdmin() || isPlayer(request.resource.data.playerId))
+        && request.resource.data.playerId in players()
         && request.resource.data.type in ['run', 'cycle', 'swim']
         && request.resource.data.km is number
         && request.resource.data.km > 0
@@ -56,6 +131,7 @@ service cloud.firestore {
         && request.resource.data.date is string
         && request.resource.data.note is string
         && request.resource.data.note.size() <= 80;
+      allow delete: if isAdmin() || isPlayer(resource.data.playerId);
       allow update: if false;
     }
   }

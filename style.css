@@ -16,6 +16,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -62,6 +63,32 @@ h1, h2, h3, .btn, .pill, .rank, .score, .lvl, .badge, .lapchip, .ptitle { font-f
 .pill.good { color: var(--lime); border-color: var(--lime); box-shadow: 0 0 12px rgba(57,255,20,.35); }
 .pill.warn { color: var(--amber); border-color: var(--amber); cursor: help; }
 .pill.bad { color: var(--red); border-color: var(--red); }
+.pill.role { background: none; cursor: default; }
+.pill.role[data-auth="claim"] { cursor: pointer; color: var(--amber); border-color: var(--amber); }
+.pill.role.player { color: var(--cyan); border-color: var(--cyan); }
+.pill.role.admin { color: var(--mag); border-color: var(--mag); box-shadow: 0 0 12px rgba(255,43,214,.35); }
+
+/* ---------- access ---------- */
+.gate {
+  display: grid; justify-items: center; gap: 12px; padding: 22px 12px; text-align: center;
+  border: 2px dashed var(--line); background: rgba(0,0,0,.3);
+}
+.gate p { margin: 0; font-family: var(--pixel); font-size: 9px; color: var(--dim); line-height: 1.6; }
+.claim-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 14px; }
+.claim-slot {
+  display: grid; justify-items: center; gap: 8px; padding: 14px 8px; cursor: pointer;
+  background: rgba(0,0,0,.35); border: 2px solid var(--line); border-top: 4px solid var(--c);
+  color: var(--text); font: 700 15px var(--body);
+}
+.claim-slot:hover:not(:disabled) { border-color: var(--c); box-shadow: 0 0 14px color-mix(in srgb, var(--c) 40%, transparent) inset; }
+.claim-slot small { font-family: var(--pixel); font-size: 7px; color: var(--lime); }
+.claim-slot:disabled { opacity: .4; cursor: not-allowed; }
+.claim-slot:disabled small { color: var(--dim); }
+.accounts { display: grid; gap: 6px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 2px dashed var(--line); }
+.accounts h3 { margin: 0 0 4px; font-size: 9px; color: var(--dim); }
+.acct { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: rgba(0,0,0,.3); border-left: 3px solid var(--c); }
+.acct b { color: var(--c); }
+.acct span { flex: 1; font-family: var(--pixel); font-size: 7px; color: var(--dim); }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -260,7 +287,11 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
   background: rgba(0,0,0,.35); border: 2px solid var(--line);
   border-image: linear-gradient(90deg, var(--f), var(--t)) 1;
 }
-.ch-card.ch-active { box-shadow: 0 0 16px rgba(255,43,214,.18) inset; }
+.ch-card.ch-active, .ch-card.ch-claimed { box-shadow: 0 0 16px rgba(255,43,214,.18) inset; }
+.ch-card.ch-disputed { box-shadow: 0 0 16px rgba(255,51,85,.25) inset; }
+.ch-claimed .ch-status { color: var(--amber); }
+.ch-disputed .ch-status { color: var(--red); }
+.ch-note { font-size: 13px; color: var(--amber); }
 .ch-card.ch-completed, .ch-card.ch-failed { opacity: .75; }
 .ch-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ch-vs { font-family: var(--pixel); font-size: 8px; color: var(--mag); }

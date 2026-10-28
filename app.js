@@ -49,7 +49,24 @@
     teams: {},
     activities: [],
     challenges: [],
+    members: {},      // uid -> { playerId }
+    claims: {},       // playerId -> { uid }
+    user: null,       // signed-in Google account
+    ready: false,
+    claimDismissed: false,
     store: null,
+  };
+
+  // ---------- access (RBAC) ----------
+  // viewer: anyone (read-only) · player: signed in and owns one player slot · admin: uid listed in config.admins.
+  // Local mode has no accounts, so everyone gets admin. The UI only hides what you can't do;
+  // firestore.rules is what actually enforces it.
+  const access = {
+    get local() { return state.store?.mode === "local"; },
+    get admin() { return this.local || (!!state.user && (CFG.admins || []).includes(state.user.uid)); },
+    get me() { return (state.user && state.members[state.user.uid]?.playerId) || null; },
+    get member() { return this.local || !!this.me; },
+    owns(playerId) { return this.admin || this.me === playerId; },
   };
 
   const fmt = (km, dp = 1) => `${km.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })} KM`;
@@ -66,6 +83,7 @@
     return {
       mode: "local",
       subscribe(f) { listeners.push(f); f(snap()); },
+      onAuth(f) { f(null); },
       async savePlayer(id, p) { data.players[id] = { ...data.players[id], ...p }; emit(); },
       async saveTeam(id, t) { data.teams[id] = { ...data.teams[id], ...t }; emit(); },
       async addActivity(a) { data.activities.push({ ...a, id: uid() }); emit(); },
@@ -79,13 +97,16 @@
     const base = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
     const { initializeApp } = await import(`${base}/firebase-app.js`);
     const fs = await import(`${base}/firebase-firestore.js`);
-    const db = fs.getFirestore(initializeApp(conf));
+    const fa = await import(`${base}/firebase-auth.js`);
+    const app = initializeApp(conf);
+    const db = fs.getFirestore(app);
+    const auth = fa.getAuth(app);
 
-    let players = {}, teams = {}, activities = [], challenges = [];
-    const ready = { p: false, t: false, a: false, c: false };
+    let players = {}, teams = {}, activities = [], challenges = [], members = {}, claims = {};
+    const ready = { p: false, t: false, a: false, c: false, m: false, k: false };
     const listeners = [];
     const emit = () => {
-      if (ready.p && ready.t && ready.a && ready.c) listeners.forEach(f => f({ players, teams, activities, challenges }));
+      if (Object.values(ready).every(Boolean)) listeners.forEach(f => f({ players, teams, activities, challenges, members, claims }));
     };
     const onErr = e => { console.error(e); toast("SYNC ERROR — CHECK FIRESTORE RULES", "bad"); setMode("ERROR", "bad"); };
 
@@ -101,10 +122,32 @@
     fs.onSnapshot(fs.collection(db, "challenges"), snap => {
       challenges = snap.docs.map(d => ({ id: d.id, ...d.data() })); ready.c = true; emit();
     }, onErr);
+    fs.onSnapshot(fs.collection(db, "members"), snap => {
+      members = {}; snap.forEach(d => { members[d.id] = d.data(); }); ready.m = true; emit();
+    }, onErr);
+    fs.onSnapshot(fs.collection(db, "claims"), snap => {
+      claims = {}; snap.forEach(d => { claims[d.id] = d.data(); }); ready.k = true; emit();
+    }, onErr);
 
     return {
       mode: "online",
       subscribe(f) { listeners.push(f); emit(); },
+      onAuth: f => fa.onAuthStateChanged(auth, f),
+      signIn: () => fa.signInWithPopup(auth, new fa.GoogleAuthProvider()),
+      signOut: () => fa.signOut(auth),
+      // the claim and the membership are written together so a slot can't end up half-taken
+      claimPlayer(uid, playerId) {
+        const b = fs.writeBatch(db);
+        b.set(fs.doc(db, "claims", playerId), { uid });
+        b.set(fs.doc(db, "members", uid), { playerId });
+        return b.commit();
+      },
+      releasePlayer(playerId, uid) {
+        const b = fs.writeBatch(db);
+        b.delete(fs.doc(db, "claims", playerId));
+        b.delete(fs.doc(db, "members", uid));
+        return b.commit();
+      },
       savePlayer: (id, p) => fs.setDoc(fs.doc(db, "players", id), p, { merge: true }),
       saveTeam: (id, t) => fs.setDoc(fs.doc(db, "teams", id), t, { merge: true }),
       addActivity: a => fs.addDoc(fs.collection(db, "activities"), a),
@@ -330,25 +373,49 @@
               <span class="gain">+${(a.km * mult(a.type)).toFixed(1)}</span></div>
             <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}</div>
           </div>
-          <button class="del" data-id="${esc(a.id)}" type="button" title="Delete">✕</button>
+          ${access.owns(a.playerId) ? `<button class="del" data-id="${esc(a.id)}" type="button" title="Delete">✕</button>` : ""}
         </li>`;
     }).join("");
   }
 
+  // Bet flow: pending -> active -> (claimed -> confirmed | disputed) -> completed / failed.
+  // A player can settle straight away in their opponent's favour, but a win they claim for
+  // themselves needs the other side to confirm. The admin referees bets they're not part of.
+  const OPEN_BET = ["active", "claimed", "disputed"];
+
   function challengeCard(c, P) {
     const f = P[c.from], t = P[c.to];
     const stake = fmt(c.stake);
-    const overdue = c.deadline && c.deadline < today() && (c.status === "pending" || c.status === "active");
+    const overdue = c.deadline && c.deadline < today() && (c.status === "pending" || OPEN_BET.includes(c.status));
+    const me = access.me, isTo = me === c.to, isFrom = me === c.from;
+    const referee = access.admin && !isTo && !isFrom;
+    const btn = (act, label, cls = "") => `<button type="button" class="btn sm ${cls}" data-act="${act}">${label}</button>`;
     const confirmBtn = (act, label, cls = "") => `<button type="button" class="btn sm ${cls}" data-act="${act}" data-confirm>${label}</button>`;
-    let status = "", actions = "";
+    const proof = `<input class="ch-proof" maxlength="60" placeholder="Proof / time (optional)">`;
+    const refereeBtns = proof + confirmBtn("completed", `✔ ${esc(t.name)} DID IT`, "win") +
+      confirmBtn("failed", "✖ FAILED", "lose") + confirmBtn("cancel", "VOID", "ghost");
+    let status = "", actions = "", note = "";
     if (c.status === "pending") {
       status = `AWAITING ${esc(t.name)}`;
-      actions = `<button type="button" class="btn sm primary" data-act="accept">ACCEPT</button>` +
-        confirmBtn("decline", "DECLINE") + confirmBtn("cancel", "CANCEL BET", "ghost");
+      if (isTo || referee) actions += btn("accept", "ACCEPT", "primary") + confirmBtn("decline", "DECLINE");
+      if (isFrom || referee) actions += confirmBtn("cancel", "CANCEL BET", "ghost");
     } else if (c.status === "active") {
       status = overdue ? "OVERDUE" : "● LIVE";
-      actions = `<input class="ch-proof" maxlength="60" placeholder="Proof / time (optional)">` +
-        confirmBtn("completed", `✔ ${esc(t.name)} DID IT`, "win") + confirmBtn("failed", "✖ FAILED", "lose");
+      if (isTo) actions = proof + confirmBtn("claim", "✔ I DID IT", "win") + confirmBtn("failed", "✖ I FAILED", "lose");
+      else if (isFrom) actions = proof + confirmBtn("claim", "✖ THEY FAILED", "lose") + confirmBtn("completed", "✔ THEY DID IT", "win");
+      else if (referee) actions = refereeBtns;
+    } else if (c.status === "claimed") {
+      const claimer = P[c.claimedBy], other = c.claimedBy === c.to ? f : t;
+      status = "⏳ AWAITING CONFIRM";
+      note = `${esc(claimer.name)} says ${esc(t.name)} ${c.claim === "completed" ? "DID IT" : "FAILED"}. Waiting for ${esc(other.name)} to confirm.`;
+      if ((isTo || isFrom) && me !== c.claimedBy) actions = confirmBtn("confirm", "✔ CONFIRM", "win") + confirmBtn("dispute", "⚠ DISPUTE", "lose");
+      else if (referee) actions = refereeBtns;
+    } else if (c.status === "disputed") {
+      status = "⚠ DISPUTED";
+      note = "The admin will settle this one, or either side can back down.";
+      if (isTo) actions = confirmBtn("failed", "✖ OK, I FAILED", "lose");
+      else if (isFrom) actions = confirmBtn("completed", "✔ OK, THEY DID IT", "win");
+      else if (referee) actions = refereeBtns;
     } else {
       const w = P[betWinner(c)];
       status = `${esc(w.name)} WON`;
@@ -368,6 +435,7 @@
         <p class="ch-text"><b style="color:${esc(f.color)}">${esc(f.name)}</b> bets ${stake} that
           <b style="color:${esc(t.color)}">${esc(t.name)}</b> can't <q>${esc(c.desc)}</q></p>
         ${c.deadline || c.proof ? `<div class="ch-meta">${c.deadline ? `⏱ BY ${shortDate(c.deadline)}` : ""}${c.proof ? ` · PROOF: ${esc(c.proof)}` : ""}</div>` : ""}
+        ${note ? `<div class="ch-note">${note}</div>` : ""}
         ${payout}
         ${actions ? `<div class="ch-actions">${actions}</div>` : ""}
       </div>`;
@@ -377,7 +445,7 @@
     const P = Object.fromEntries(roster().map(p => [p.id, p]));
     const cs = state.challenges.filter(c => P[c.from] && P[c.to]);
     const newest = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
-    const live = cs.filter(c => c.status === "active").sort(newest);
+    const live = cs.filter(c => OPEN_BET.includes(c.status)).sort(newest);
     const pending = cs.filter(c => c.status === "pending").sort(newest);
     const done = cs.filter(c => betWinner(c)).sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0)).slice(0, 4);
     const section = (title, list) => list.length ? `<h3 class="ch-group">${title} <span>${list.length}</span></h3>${list.map(c => challengeCard(c, P)).join("")}` : "";
@@ -396,11 +464,66 @@
       Object.keys(TYPES).map(t => `<span>${TYPES[t].icon} ${TYPES[t].label} <b>×${mult(t)}</b></span>`).join("") + `</div>`;
   }
 
+  // players can only act as themselves; the admin (and local mode) can pick anyone
+  const selectablePlayers = () => roster().filter(p => access.admin || p.id === access.me);
+
   function renderPlayerSelect() {
     const sel = $("#fPlayer");
-    const cur = sel.value || ls.get("gbg-last-player", CFG.players[0].id);
-    sel.innerHTML = roster().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
-    sel.value = cur;
+    const cur = access.admin ? sel.value || ls.get("gbg-last-player", CFG.players[0].id) : access.me;
+    sel.innerHTML = selectablePlayers().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    if (cur) sel.value = cur;
+    sel.disabled = !access.admin;
+  }
+
+  function gateHTML(what) {
+    return state.user
+      ? `<p>PICK YOUR PLAYER TO ${what}</p><button class="btn primary" type="button" data-auth="claim">CHOOSE PLAYER</button>`
+      : `<p>SIGN IN TO ${what}</p><button class="btn primary" type="button" data-auth="in">SIGN IN WITH GOOGLE</button>`;
+  }
+
+  function renderAccess() {
+    const P = Object.fromEntries(roster().map(p => [p.id, p]));
+    const role = access.local ? "" : access.admin ? "ADMIN" : access.me ? "PLAYER" : state.user ? "NO PLAYER YET" : "VIEWER";
+    const roleEl = $("#role");
+    roleEl.hidden = access.local;
+    roleEl.textContent = access.me ? `${P[access.me].name} · ${role}` : role;
+    roleEl.className = `pill role ${access.admin ? "admin" : access.me ? "player" : ""}`;
+    roleEl.dataset.auth = state.user && !access.me ? "claim" : "";
+
+    const authBtn = $("#authBtn");
+    authBtn.hidden = access.local;
+    authBtn.textContent = state.user ? "SIGN OUT" : "SIGN IN";
+    authBtn.dataset.auth = state.user ? "out" : "in";
+
+    $("#squadBtn").hidden = !access.member;
+    $("#squadBtn").textContent = access.admin ? "EDIT SQUAD" : "EDIT PROFILE";
+
+    $("#logForm").hidden = !access.member;
+    $("#logGate").hidden = access.member;
+    $("#chBtn").hidden = !access.member;
+    $("#betGate").hidden = access.member;
+    if (!access.member) {
+      $("#logGate").innerHTML = gateHTML("LOG QUESTS");
+      $("#betGate").innerHTML = gateHTML("MAKE AND TAKE BETS");
+    }
+  }
+
+  function openClaim() {
+    const free = roster().filter(p => !state.claims[p.id]);
+    $("#claimList").innerHTML = roster().map(p => {
+      const taken = !!state.claims[p.id];
+      return `
+        <button type="button" class="claim-slot" data-claim="${esc(p.id)}" style="--c:${esc(p.color)}" ${taken ? "disabled" : ""}>
+          ${avatarHTML(p, "lg")}<span>${esc(p.name)}</span><small>${taken ? "TAKEN" : "AVAILABLE"}</small>
+        </button>`;
+    }).join("");
+    $("#claimEmpty").hidden = free.length > 0;
+    if (!$("#claimDlg").open) $("#claimDlg").showModal();
+  }
+
+  // prompt a freshly signed-in account to pick a slot (once per page load if they close it)
+  function maybeClaim() {
+    if (state.ready && state.user && !access.me && !access.local && !state.claimDismissed && !$("#claimDlg").open) openClaim();
   }
 
   function render() {
@@ -411,6 +534,7 @@
     renderChallenges();
     renderFeed();
     renderPlayerSelect();
+    renderAccess();
     updatePreview();
   }
 
@@ -460,14 +584,28 @@
   const pending = {};
   function openSquad() {
     Object.keys(pending).forEach(k => delete pending[k]);
-    const teams = teamRoster();
+    const admin = access.admin;
+    const teams = admin ? teamRoster() : [];
+    $("#squadTitle").textContent = admin ? "EDIT SQUAD" : "EDIT PROFILE";
+    $("#accounts").hidden = !admin || access.local;
+    if (admin && !access.local) {
+      $("#accounts").innerHTML = `<h3>ACCOUNTS</h3>` + roster().map(p => {
+        const claim = state.claims[p.id];
+        return `
+          <div class="acct" style="--c:${esc(p.color)}">
+            <b>${esc(p.name)}</b>
+            <span>${claim ? (state.user && claim.uid === state.user.uid ? "LINKED (YOU)" : "LINKED") : "UNCLAIMED"}</span>
+            ${claim ? `<button type="button" class="btn sm ghost" data-release="${esc(p.id)}">RESET</button>` : ""}
+          </div>`;
+      }).join("");
+    }
     $("#teamEdit").innerHTML = teams.map(t => `
       <div class="team-edit" data-id="${esc(t.id)}" style="--t:${esc(t.color)}">
         <label class="field grow"><span>TEAM NAME</span><input class="tm-name" maxlength="20" value="${esc(t.name)}"></label>
         <label class="field"><span>COLOUR</span><input class="tm-color" type="color" value="${esc(t.color)}"></label>
       </div>`).join("");
     const teamOpts = sel => teams.map(t => `<option value="${esc(t.id)}" ${t.id === sel ? "selected" : ""}>${esc(t.name)}</option>`).join("");
-    $("#squadCards").innerHTML = roster().map(p => `
+    $("#squadCards").innerHTML = roster().filter(p => access.owns(p.id)).map(p => `
       <div class="squad-card" data-id="${esc(p.id)}" style="--c:${esc(p.color)}">
         <label class="pic" title="Upload pic">${avatarHTML(p, "xl")}<input type="file" accept="image/*" hidden><span class="pic-hint">UPLOAD</span></label>
         <label class="field"><span>NAME</span><input class="sq-name" maxlength="16" value="${esc(p.name)}"></label>
@@ -508,7 +646,7 @@
         await state.store.savePlayer(id, { name, color, ...(teamSel ? { team: teamSel.value } : {}), ...pending[id] });
       }
       $("#squadDlg").close();
-      toast("SQUAD SAVED", "good");
+      toast(access.admin ? "SQUAD SAVED" : "PROFILE SAVED", "good");
     } catch (e) {
       console.error(e);
       toast("SAVE FAILED", "bad");
@@ -516,6 +654,59 @@
       btn.disabled = false;
     }
   });
+
+  $("#accounts").addEventListener("click", async e => {
+    const btn = e.target.closest("[data-release]");
+    if (!btn) return;
+    if (!btn.classList.contains("armed")) {
+      btn.classList.add("armed");
+      btn.textContent = "SURE?";
+      setTimeout(() => { btn.classList.remove("armed"); btn.textContent = "RESET"; }, 3000);
+      return;
+    }
+    const playerId = btn.dataset.release;
+    try {
+      await state.store.releasePlayer(playerId, state.claims[playerId].uid);
+      toast("SLOT RESET — IT CAN BE CLAIMED AGAIN", "good");
+      $("#squadDlg").close();
+    } catch (err) {
+      console.error(err);
+      toast("RESET FAILED", "bad");
+    }
+  });
+
+  // ---------- sign-in & claiming a player ----------
+  document.addEventListener("click", async e => {
+    const el = e.target.closest("[data-auth]");
+    if (!el || !el.dataset.auth) return;
+    const action = el.dataset.auth;
+    if (action === "claim") { state.claimDismissed = false; openClaim(); return; }
+    try {
+      if (action === "in") await state.store.signIn();
+      if (action === "out") { await state.store.signOut(); toast("SIGNED OUT"); }
+    } catch (err) {
+      console.error(err);
+      if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") return;
+      toast(err.code === "auth/unauthorized-domain" ? "THIS SITE ISN'T AUTHORISED IN FIREBASE YET" : "SIGN-IN FAILED", "bad");
+    }
+  });
+
+  $("#claimList").addEventListener("click", async e => {
+    const btn = e.target.closest("[data-claim]");
+    if (!btn || !state.user) return;
+    btn.disabled = true;
+    try {
+      await state.store.claimPlayer(state.user.uid, btn.dataset.claim);
+      $("#claimDlg").close();
+      const p = roster().find(x => x.id === btn.dataset.claim);
+      toast(`WELCOME, ${p.name}!`, "lvl");
+    } catch (err) {
+      console.error(err);
+      toast("SOMEONE GOT THERE FIRST — PICK ANOTHER", "bad");
+      openClaim();
+    }
+  });
+  $("#claimClose").addEventListener("click", () => { state.claimDismissed = true; $("#claimDlg").close(); });
 
   // ---------- form ----------
   function setupForm() {
@@ -587,10 +778,12 @@
 
   // ---------- challenges ----------
   function openChallenge() {
-    const opts = roster().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    const opts = list => list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const from = $("#cFrom"), to = $("#cTo");
-    from.innerHTML = to.innerHTML = opts;
-    from.value = ls.get("gbg-last-player", CFG.players[0].id);
+    from.innerHTML = opts(selectablePlayers());
+    to.innerHTML = opts(roster());
+    from.value = access.admin ? ls.get("gbg-last-player", CFG.players[0].id) : access.me;
+    from.disabled = !access.admin;
     to.value = CFG.players.find(p => p.id !== from.value).id;
     $("#cDeadline").min = today();
     $("#chDlg").showModal();
@@ -651,17 +844,21 @@
       cancel: { status: "cancelled" },
       completed: { status: "completed" },
       failed: { status: "failed" },
+      claim: { status: "claimed", claim: access.me === c.to ? "completed" : "failed", claimedBy: access.me },
+      confirm: { status: c.claim },
+      dispute: { status: "disputed" },
     }[act];
-    if (act === "completed" || act === "failed") {
-      fields.proof = (card.querySelector(".ch-proof")?.value || "").trim().slice(0, 60);
-      fields.resolvedAt = Date.now();
-    }
+    const proof = (card.querySelector(".ch-proof")?.value || "").trim().slice(0, 60);
+    if (proof) fields.proof = proof;
+    if (fields.status === "completed" || fields.status === "failed") fields.resolvedAt = Date.now();
     btn.disabled = true;
     try {
       await state.store.updateChallenge(c.id, fields);
       if (act === "accept") toast(`${P[c.to].name} ACCEPTS! GAME ON`, "cp");
-      else if (act === "completed") toast(`${P[c.to].name} WINS +${fmt(c.stake)}`, "good");
-      else if (act === "failed") toast(`${P[c.from].name} WINS +${fmt(c.stake)}`, "good");
+      else if (fields.status === "completed") toast(`${P[c.to].name} WINS +${fmt(c.stake)}`, "good");
+      else if (fields.status === "failed") toast(`${P[c.from].name} WINS +${fmt(c.stake)}`, "good");
+      else if (act === "claim") toast(`CLAIM SENT — WAITING FOR ${P[access.me === c.to ? c.from : c.to].name}`, "cp");
+      else if (act === "dispute") toast("DISPUTED — THE ADMIN WILL SETTLE IT", "bad");
       else toast(act === "decline" ? "CHALLENGE DECLINED" : "BET CANCELLED");
     } catch (err) {
       console.error(err);
@@ -720,12 +917,25 @@
       $("#mode").title = "Data is only saved in this browser. Add Firebase config in config.js to share.";
     }
 
-    state.store.subscribe(({ players, teams, activities, challenges }) => {
+    state.store.subscribe(({ players, teams, activities, challenges, members, claims }) => {
       state.players = players || {};
       state.teams = teams || {};
       state.challenges = challenges || [];
       state.activities = activities || [];
+      state.members = members || {};
+      state.claims = claims || {};
+      state.ready = true;
       render();
+      maybeClaim();
+    });
+    let authSeen = false; // the first callback is just the restored session, so don't toast it
+    state.store.onAuth(user => {
+      const wasSignedIn = !!state.user;
+      state.user = user ? { uid: user.uid, name: user.displayName || "" } : null;
+      if (user && !wasSignedIn && authSeen) toast(`SIGNED IN${user.displayName ? ` AS ${user.displayName.toUpperCase()}` : ""}`, "good");
+      authSeen = true;
+      render();
+      maybeClaim();
     });
     render();
   }
