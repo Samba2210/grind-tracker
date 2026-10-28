@@ -6,9 +6,19 @@ service cloud.firestore {
     match /players/{id} {
       allow read: if true;
       allow write: if id in ['p1', 'p2', 'p3', 'p4']
-        && request.resource.data.keys().hasOnly(['name', 'color', 'avatar'])
+        && request.resource.data.keys().hasOnly(['name', 'color', 'avatar', 'team'])
+        && (!('team' in request.resource.data) || request.resource.data.team in ['t1', 't2'])
         && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 16))
         && (!('avatar' in request.resource.data) || (request.resource.data.avatar is string && request.resource.data.avatar.size() < 200000));
+    }
+
+    // Teams (name, colour)
+    match /teams/{id} {
+      allow read: if true;
+      allow write: if id in ['t1', 't2']
+        && request.resource.data.keys().hasOnly(['name', 'color'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 20;
     }
 
     // Activities

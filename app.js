@@ -42,6 +42,7 @@
   const state = {
     unit: ls.get("gbg-unit", "mi"),
     players: {},      // overrides from store
+    teams: {},
     activities: [],
     store: null,
   };
@@ -53,16 +54,15 @@
   function localStore() {
     const KEY = "gbg-data-v1";
     const data = ls.get(KEY, { players: {}, activities: [] });
+    data.teams = data.teams || {};
     const listeners = [];
-    const emit = () => {
-      ls.set(KEY, data);
-      const snap = { players: data.players, activities: [...data.activities] };
-      listeners.forEach(f => f(snap));
-    };
+    const snap = () => ({ players: data.players, teams: data.teams, activities: [...data.activities] });
+    const emit = () => { ls.set(KEY, data); listeners.forEach(f => f(snap())); };
     return {
       mode: "local",
-      subscribe(f) { listeners.push(f); f({ players: data.players, activities: [...data.activities] }); },
+      subscribe(f) { listeners.push(f); f(snap()); },
       async savePlayer(id, p) { data.players[id] = { ...data.players[id], ...p }; emit(); },
+      async saveTeam(id, t) { data.teams[id] = { ...data.teams[id], ...t }; emit(); },
       async addActivity(a) { data.activities.push({ ...a, id: uid() }); emit(); },
       async deleteActivity(id) { data.activities = data.activities.filter(a => a.id !== id); emit(); },
     };
@@ -74,14 +74,17 @@
     const fs = await import(`${base}/firebase-firestore.js`);
     const db = fs.getFirestore(initializeApp(conf));
 
-    let players = {}, activities = [];
-    const ready = { p: false, a: false };
+    let players = {}, teams = {}, activities = [];
+    const ready = { p: false, t: false, a: false };
     const listeners = [];
-    const emit = () => { if (ready.p && ready.a) listeners.forEach(f => f({ players, activities })); };
+    const emit = () => { if (ready.p && ready.t && ready.a) listeners.forEach(f => f({ players, teams, activities })); };
     const onErr = e => { console.error(e); toast("SYNC ERROR — CHECK FIRESTORE RULES", "bad"); setMode("ERROR", "bad"); };
 
     fs.onSnapshot(fs.collection(db, "players"), snap => {
       players = {}; snap.forEach(d => { players[d.id] = d.data(); }); ready.p = true; emit();
+    }, onErr);
+    fs.onSnapshot(fs.collection(db, "teams"), snap => {
+      teams = {}; snap.forEach(d => { teams[d.id] = d.data(); }); ready.t = true; emit();
     }, onErr);
     fs.onSnapshot(fs.collection(db, "activities"), snap => {
       activities = snap.docs.map(d => ({ id: d.id, ...d.data() })); ready.a = true; emit();
@@ -91,18 +94,37 @@
       mode: "online",
       subscribe(f) { listeners.push(f); emit(); },
       savePlayer: (id, p) => fs.setDoc(fs.doc(db, "players", id), p, { merge: true }),
+      saveTeam: (id, t) => fs.setDoc(fs.doc(db, "teams", id), t, { merge: true }),
       addActivity: a => fs.addDoc(fs.collection(db, "activities"), a),
       deleteActivity: id => fs.deleteDoc(fs.doc(db, "activities", id)),
     };
   }
 
   // ---------- derived data ----------
-  function roster() {
-    return CFG.players.map(p => {
-      const o = state.players[p.id] || {};
-      return { ...p, name: o.name || p.name, color: o.color || p.color, avatar: safeImg(o.avatar) };
+  function teamRoster() {
+    return (CFG.teams || []).map(t => {
+      const o = state.teams[t.id] || {};
+      return { ...t, name: o.name || t.name, color: o.color || t.color };
     });
   }
+
+  function roster() {
+    const teams = Object.fromEntries(teamRoster().map(t => [t.id, t]));
+    return CFG.players.map(p => {
+      const o = state.players[p.id] || {};
+      const team = teams[o.team] ? o.team : p.team;
+      return { ...p, name: o.name || p.name, color: o.color || p.color, avatar: safeImg(o.avatar), team, teamInfo: teams[team] };
+    });
+  }
+
+  function computeTeams(stats) {
+    return teamRoster().map(t => {
+      const members = stats.filter(s => s.team === t.id);
+      return { ...t, members, pts: members.reduce((s, m) => s + m.pts, 0) };
+    }).sort((a, b) => b.pts - a.pts);
+  }
+
+  const teamChip = t => t ? `<span class="teamchip" style="--t:${esc(t.color)}">${esc(t.name)}</span>` : "";
 
   function computeStats() {
     return roster().map(p => {
@@ -149,7 +171,7 @@
           <div class="rank">${i + 1}</div>
           ${avatarHTML(p, "lg")}
           <div class="info">
-            <div class="name">${esc(p.name)} <span class="lvl">LV ${p.level}</span><span class="ptitle">${p.title}</span>${p.lap > 1 ? `<span class="lapchip">LAP ${p.lap}</span>` : ""}</div>
+            <div class="name">${esc(p.name)} ${teamChip(p.teamInfo)}<span class="lvl">LV ${p.level}</span><span class="ptitle">${p.title}</span>${p.lap > 1 ? `<span class="lapchip">LAP ${p.lap}</span>` : ""}</div>
             <div class="xp" title="${Math.round(p.xp * 100)}% to LV ${p.level + 1}"><i style="width:${(p.xp * 100).toFixed(1)}%"></i></div>
             <div class="meta">${raw}<span class="next">${nextTxt}</span></div>
             ${p.badges.length ? `<div class="badges">${p.badges.map(b => `<span class="badge" title="${esc(b.tip)}">${b.label}</span>`).join("")}</div>` : ""}
@@ -157,6 +179,32 @@
           <div class="score">${toUnit(p.pts).toFixed(1)}<small>${state.unit.toUpperCase()}</small></div>
         </li>`;
     }).join("");
+  }
+
+  function renderTeams(teams) {
+    const panel = $("#teamsPanel");
+    panel.hidden = teams.length < 2;
+    if (panel.hidden) return;
+    const total = teams.reduce((s, t) => s + t.pts, 0);
+    const leading = teams[0].pts > teams[1].pts;
+    // keep config order in the tug bar so it doesn't flip sides when the lead changes
+    const ordered = [...teams].sort((a, b) => CFG.teams.findIndex(t => t.id === a.id) - CFG.teams.findIndex(t => t.id === b.id));
+    const tug = ordered.map(t =>
+      `<i style="--t:${esc(t.color)};flex-grow:${total ? Math.max(t.pts, total * 0.04) : 1}"></i>`).join("");
+    const cards = ordered.map(t => {
+      const lead = leading && t.id === teams[0].id;
+      const pos = t.pts % GOAL, lap = Math.floor(t.pts / GOAL) + 1;
+      const next = CFG.route.checkpoints.find(c => c.km > pos);
+      return `
+        <div class="team-card ${lead ? "lead" : ""}" style="--t:${esc(t.color)}">
+          <div class="team-name">${lead ? "♛ " : ""}${esc(t.name)}</div>
+          <div class="team-score">${toUnit(t.pts).toFixed(1)}<small>${state.unit.toUpperCase()}</small></div>
+          <div class="team-members">${t.members.map(m => avatarHTML(m, "sm")).join("") || `<span class="dim">NO PLAYERS</span>`}</div>
+          <div class="team-prog"><i style="width:${(pos / GOAL * 100).toFixed(1)}%"></i></div>
+          <div class="team-meta">${lap > 1 ? `LAP ${lap} · ` : ""}${next ? `NEXT: ${esc(next.name)} in ${fmt(next.km - pos, 0)}` : ""}</div>
+        </div>`;
+    });
+    $("#teams").innerHTML = `<div class="tug">${tug}</div><div class="team-cards">${cards.join(`<div class="vs">VS</div>`)}</div>`;
   }
 
   function renderTrack(stats) {
@@ -180,7 +228,7 @@
       const at = pct(p.pos);
       if (at - clusterStart < 5) off++; else { clusterStart = at; off = 0; }
       html += `
-        <div class="marker" style="bottom:${at}%;--off:${off};--c:${esc(p.color)}" title="${esc(p.name)}: ${fmt(p.pts)}">
+        <div class="marker" style="bottom:${at}%;--off:${off};--c:${esc(p.color)};--t:${esc(p.teamInfo?.color || p.color)}" title="${esc(p.name)}${p.teamInfo ? ` (${esc(p.teamInfo.name)})` : ""}: ${fmt(p.pts)}">
           ${avatarHTML(p)}
           ${p.lap > 1 ? `<span class="lap">L${p.lap}</span>` : ""}
           <span class="mk-name">${esc(p.name)}</span>
@@ -230,6 +278,7 @@
   function render() {
     const stats = computeStats();
     $("#unitBtn").textContent = state.unit.toUpperCase();
+    renderTeams(computeTeams(stats));
     renderBoard(stats);
     renderTrack(stats);
     renderFeed();
@@ -284,11 +333,19 @@
   const pending = {};
   function openSquad() {
     Object.keys(pending).forEach(k => delete pending[k]);
+    const teams = teamRoster();
+    $("#teamEdit").innerHTML = teams.map(t => `
+      <div class="team-edit" data-id="${esc(t.id)}" style="--t:${esc(t.color)}">
+        <label class="field grow"><span>TEAM NAME</span><input class="tm-name" maxlength="20" value="${esc(t.name)}"></label>
+        <label class="field"><span>COLOUR</span><input class="tm-color" type="color" value="${esc(t.color)}"></label>
+      </div>`).join("");
+    const teamOpts = sel => teams.map(t => `<option value="${esc(t.id)}" ${t.id === sel ? "selected" : ""}>${esc(t.name)}</option>`).join("");
     $("#squadCards").innerHTML = roster().map(p => `
       <div class="squad-card" data-id="${esc(p.id)}" style="--c:${esc(p.color)}">
         <label class="pic" title="Upload pic">${avatarHTML(p, "xl")}<input type="file" accept="image/*" hidden><span class="pic-hint">UPLOAD</span></label>
         <label class="field"><span>NAME</span><input class="sq-name" maxlength="16" value="${esc(p.name)}"></label>
         <label class="field"><span>COLOUR</span><input class="sq-color" type="color" value="${esc(p.color)}"></label>
+        ${teams.length ? `<label class="field"><span>TEAM</span><select class="sq-team">${teamOpts(p.team)}</select></label>` : ""}
       </div>`).join("");
     $("#squadDlg").showModal();
   }
@@ -311,11 +368,17 @@
     const btn = $("#squadSave");
     btn.disabled = true;
     try {
+      for (const row of $("#teamEdit").children) {
+        const id = row.dataset.id;
+        const name = row.querySelector(".tm-name").value.trim().toUpperCase() || id.toUpperCase();
+        await state.store.saveTeam(id, { name, color: row.querySelector(".tm-color").value });
+      }
       for (const card of $("#squadCards").children) {
         const id = card.dataset.id;
         const name = card.querySelector(".sq-name").value.trim().toUpperCase() || id.toUpperCase();
         const color = card.querySelector(".sq-color").value;
-        await state.store.savePlayer(id, { name, color, ...pending[id] });
+        const teamSel = card.querySelector(".sq-team");
+        await state.store.savePlayer(id, { name, color, ...(teamSel ? { team: teamSel.value } : {}), ...pending[id] });
       }
       $("#squadDlg").close();
       toast("SQUAD SAVED", "good");
@@ -345,7 +408,9 @@
       if (!(v > 0)) return;
       const km = Math.round(($("#fUnit").value === "mi" ? v * KM_PER_MI : v) * 1000) / 1000;
 
-      const before = computeStats().find(s => s.id === playerId);
+      const statsBefore = computeStats();
+      const before = statsBefore.find(s => s.id === playerId);
+      const teamsBefore = computeTeams(statsBefore);
       const btn = e.submitter || $("#logForm button[type=submit]");
       btn.disabled = true;
       try {
@@ -365,6 +430,9 @@
           const cp = [...CFG.route.checkpoints].reverse().find(c => c.km <= pos);
           toast(Math.floor(afterPts / GOAL) > Math.floor(before.pts / GOAL) ? "ROUTE COMPLETE! LAP UP!" : `CHECKPOINT: ${cp.name.toUpperCase()}`, "cp");
         }
+        const myTeam = teamsBefore.find(t => t.id === before.team);
+        const rival = teamsBefore.filter(t => t !== myTeam).reduce((m, t) => Math.max(m, t.pts), 0);
+        if (myTeam && myTeam.pts <= rival && myTeam.pts + km * mult(type) > rival) toast(`${myTeam.name} TAKES THE LEAD!`, "lvl");
         $("#fDist").value = "";
         $("#fNote").value = "";
         updatePreview();
@@ -422,8 +490,9 @@
       $("#mode").title = "Data is only saved in this browser. Add Firebase config in config.js to share.";
     }
 
-    state.store.subscribe(({ players, activities }) => {
+    state.store.subscribe(({ players, teams, activities }) => {
       state.players = players || {};
+      state.teams = teams || {};
       state.activities = activities || [];
       render();
     });

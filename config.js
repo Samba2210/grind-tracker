@@ -27,12 +27,18 @@ window.APP_CONFIG = {
   // Adjusted km per level on the leaderboard
   kmPerLevel: 20,
 
-  // The four players. Names and pics can be changed in-app ("EDIT SQUAD").
+  // Teams. Names, colours and who's on which team can be changed in-app ("EDIT SQUAD").
+  teams: [
+    { id: "t1", name: "TEAM RED", color: "#ff3355" },
+    { id: "t2", name: "TEAM BLUE", color: "#3d7bff" },
+  ],
+
+  // The four players. Names, pics and teams can be changed in-app ("EDIT SQUAD").
   players: [
-    { id: "p1", name: "PLAYER 1", color: "#00f0ff" },
-    { id: "p2", name: "PLAYER 2", color: "#ff2bd6" },
-    { id: "p3", name: "PLAYER 3", color: "#39ff14" },
-    { id: "p4", name: "PLAYER 4", color: "#ffb800" },
+    { id: "p1", name: "PLAYER 1", color: "#00f0ff", team: "t1" },
+    { id: "p2", name: "PLAYER 2", color: "#ff2bd6", team: "t1" },
+    { id: "p3", name: "PLAYER 3", color: "#39ff14", team: "t2" },
+    { id: "p4", name: "PLAYER 4", color: "#ffb800", team: "t2" },
   ],
 
   // The route: Land's End -> John o' Groats (~1,407 km / 874 mi by road).

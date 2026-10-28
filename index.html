@@ -26,6 +26,11 @@
   </header>
 
   <main class="layout">
+    <section class="panel area-teams" id="teamsPanel" hidden>
+      <div class="panel-head"><h2>TEAM BATTLE</h2></div>
+      <div id="teams"></div>
+    </section>
+
     <section class="panel area-board">
       <div class="panel-head">
         <h2>LEADERBOARD</h2>
@@ -71,6 +76,7 @@
   <dialog id="squadDlg" class="dlg">
     <form method="dialog" class="dlg-inner" id="squadForm">
       <div class="panel-head"><h2>EDIT SQUAD</h2><button class="btn ghost" value="cancel" type="submit">✕</button></div>
+      <div id="teamEdit" class="team-edits"></div>
       <div id="squadCards" class="squad-cards"></div>
       <div class="dlg-actions">
         <button class="btn ghost" value="cancel" type="submit">CANCEL</button>

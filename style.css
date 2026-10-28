@@ -82,16 +82,17 @@ h1, h2, h3, .btn, .pill, .rank, .score, .lvl, .badge, .lapchip, .ptitle { font-f
   max-width: 1280px; margin: 0 auto;
   display: grid; gap: 20px;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "board" "log" "map" "feed";
+  grid-template-areas: "teams" "board" "log" "map" "feed";
 }
 @media (min-width: 960px) {
   .layout {
     grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-    grid-template-areas: "map board" "map log" "map feed";
+    grid-template-areas: "map teams" "map board" "map log" "map feed";
     align-items: start;
   }
   .area-map { position: sticky; top: 16px; }
 }
+.area-teams { grid-area: teams; }
 .area-board { grid-area: board; }
 .area-log { grid-area: log; }
 .area-map { grid-area: map; }
@@ -162,6 +163,34 @@ h1, h2, h3, .btn, .pill, .rank, .score, .lvl, .badge, .lapchip, .ptitle { font-f
   .avatar.lg { --s: 44px; }
 }
 
+/* ---------- teams ---------- */
+.teamchip { font-family: var(--pixel); font-size: 7px; padding: 4px 5px; border: 1px solid var(--t); color: var(--t); }
+.tug { display: flex; height: 14px; gap: 3px; margin-bottom: 14px; background: #000; border: 2px solid var(--line); padding: 2px; }
+.tug i { display: block; background: var(--t); box-shadow: 0 0 10px var(--t); flex-basis: 0; transition: flex-grow .8s; }
+.team-cards { display: flex; align-items: stretch; gap: 10px; }
+.vs { align-self: center; font-family: var(--pixel); font-size: 14px; color: var(--mag); text-shadow: 0 0 10px var(--mag); }
+.team-card {
+  flex: 1; min-width: 0; display: grid; gap: 8px; padding: 12px;
+  background: rgba(0,0,0,.35); border: 2px solid var(--line); border-top: 4px solid var(--t);
+}
+.team-card.lead { border-color: var(--t); box-shadow: 0 0 18px color-mix(in srgb, var(--t) 30%, transparent) inset; }
+.team-name { font-family: var(--pixel); font-size: 10px; color: var(--t); line-height: 1.5; overflow-wrap: anywhere; }
+.team-score { font-family: var(--pixel); font-size: 18px; color: #fff; text-shadow: 0 0 10px var(--t); }
+.team-score small { font-size: 8px; color: var(--dim); margin-left: 6px; text-shadow: none; }
+.team-members { display: flex; gap: 6px; flex-wrap: wrap; }
+.team-prog { height: 6px; background: #000; border: 1px solid var(--line); }
+.team-prog i { display: block; height: 100%; background: var(--t); transition: width .6s; }
+.team-meta { font-size: 12px; color: var(--dim); }
+.dim { color: var(--dim); font-size: 12px; }
+@media (max-width: 480px) {
+  .team-score { font-size: 14px; }
+  .vs { font-size: 10px; }
+}
+
+.team-edits { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.team-edit { display: flex; gap: 10px; padding: 12px; border: 2px solid var(--line); border-left: 4px solid var(--t); background: rgba(0,0,0,.3); }
+.team-edit .field:last-child { width: 64px; }
+
 /* ---------- map ---------- */
 .track {
   position: relative;
@@ -201,7 +230,7 @@ h1, h2, h3, .btn, .pill, .rank, .score, .lvl, .badge, .lapchip, .ptitle { font-f
   animation: bob 2.4s ease-in-out infinite;
 }
 .marker:nth-child(odd) { animation-delay: -1.2s; }
-.marker .avatar { --s: 40px; }
+.marker .avatar { --s: 40px; outline: 2px solid var(--t); outline-offset: 2px; }
 .mk-name { font-family: var(--pixel); font-size: 7px; color: var(--c); background: rgba(0,0,0,.75); padding: 2px 3px; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marker .lap { position: absolute; top: -8px; right: -10px; font-family: var(--pixel); font-size: 7px; padding: 2px 3px; background: var(--amber); color: #000; }
 @keyframes bob { 50% { translate: 0 -3px; } }
