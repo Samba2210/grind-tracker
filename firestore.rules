@@ -10,7 +10,7 @@ service cloud.firestore {
     function players() { return ['p1', 'p2', 'p3', 'p4']; }
     function signedIn() { return request.auth != null; }
     // Keep in sync with `admins` in config.js
-    function isAdmin() { return signedIn() && request.auth.uid in []; }
+    function isAdmin() { return signedIn() && request.auth.uid in ['1mfuhvJ6QRTfVPnxg05DJe1eMMs1']; }
     function memberDoc() { return /databases/$(database)/documents/members/$(request.auth.uid); }
     function isMember() { return signedIn() && exists(memberDoc()); }
     function myPlayer() { return get(memberDoc()).data.playerId; }
