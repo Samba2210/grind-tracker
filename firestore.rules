@@ -21,6 +21,30 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 20;
     }
 
+    // Challenges (bets between players)
+    match /challenges/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['from', 'to', 'stake', 'desc', 'deadline', 'status', 'createdAt'])
+        && request.resource.data.from in ['p1', 'p2', 'p3', 'p4']
+        && request.resource.data.to in ['p1', 'p2', 'p3', 'p4']
+        && request.resource.data.from != request.resource.data.to
+        && request.resource.data.stake is number
+        && request.resource.data.stake > 0
+        && request.resource.data.stake <= 50
+        && request.resource.data.desc is string
+        && request.resource.data.desc.size() > 0
+        && request.resource.data.desc.size() <= 100
+        && request.resource.data.deadline is string
+        && request.resource.data.deadline.size() <= 10
+        && request.resource.data.status == 'pending';
+      // only status moves forward: pending -> active/declined/cancelled, active -> completed/failed
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'proof', 'resolvedAt'])
+        && ((resource.data.status == 'pending' && request.resource.data.status in ['active', 'declined', 'cancelled'])
+          || (resource.data.status == 'active' && request.resource.data.status in ['completed', 'failed']))
+        && (!('proof' in request.resource.data) || (request.resource.data.proof is string && request.resource.data.proof.size() <= 60));
+      allow delete: if false;
+    }
+
     // Activities
     match /activities/{id} {
       allow read, delete: if true;

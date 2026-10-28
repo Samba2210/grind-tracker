@@ -25,7 +25,11 @@
     { id: "fish",   label: "AQUAMAN",     tip: "10 km swum in total",          test: s => s.raw.swim >= 10 },
     { id: "scot",   label: "OVER THE WALL", tip: "Reached Scotland",           test: s => s.pts >= 820 },
     { id: "lap",    label: "NEW GAME+",   tip: "Finished the whole route",     test: s => s.pts >= GOAL },
+    { id: "bet",    label: "HUSTLER",     tip: "Won a challenge",              test: s => s.betWins > 0 },
+    { id: "roll",   label: "HIGH ROLLER", tip: "Staked 10 km+ on a challenge", test: s => s.bigBet },
   ];
+
+  const MAX_STAKE_KM = 50;
 
   // ---------- helpers ----------
   const $ = (s, el = document) => el.querySelector(s);
@@ -44,6 +48,7 @@
     players: {},      // overrides from store
     teams: {},
     activities: [],
+    challenges: [],
     store: null,
   };
 
@@ -55,8 +60,9 @@
     const KEY = "gbg-data-v1";
     const data = ls.get(KEY, { players: {}, activities: [] });
     data.teams = data.teams || {};
+    data.challenges = data.challenges || [];
     const listeners = [];
-    const snap = () => ({ players: data.players, teams: data.teams, activities: [...data.activities] });
+    const snap = () => ({ players: data.players, teams: data.teams, activities: [...data.activities], challenges: [...data.challenges] });
     const emit = () => { ls.set(KEY, data); listeners.forEach(f => f(snap())); };
     return {
       mode: "local",
@@ -65,6 +71,8 @@
       async saveTeam(id, t) { data.teams[id] = { ...data.teams[id], ...t }; emit(); },
       async addActivity(a) { data.activities.push({ ...a, id: uid() }); emit(); },
       async deleteActivity(id) { data.activities = data.activities.filter(a => a.id !== id); emit(); },
+      async addChallenge(c) { data.challenges.push({ ...c, id: uid() }); emit(); },
+      async updateChallenge(id, f) { data.challenges = data.challenges.map(c => c.id === id ? { ...c, ...f } : c); emit(); },
     };
   }
 
@@ -74,10 +82,12 @@
     const fs = await import(`${base}/firebase-firestore.js`);
     const db = fs.getFirestore(initializeApp(conf));
 
-    let players = {}, teams = {}, activities = [];
-    const ready = { p: false, t: false, a: false };
+    let players = {}, teams = {}, activities = [], challenges = [];
+    const ready = { p: false, t: false, a: false, c: false };
     const listeners = [];
-    const emit = () => { if (ready.p && ready.t && ready.a) listeners.forEach(f => f({ players, teams, activities })); };
+    const emit = () => {
+      if (ready.p && ready.t && ready.a && ready.c) listeners.forEach(f => f({ players, teams, activities, challenges }));
+    };
     const onErr = e => { console.error(e); toast("SYNC ERROR — CHECK FIRESTORE RULES", "bad"); setMode("ERROR", "bad"); };
 
     fs.onSnapshot(fs.collection(db, "players"), snap => {
@@ -89,6 +99,9 @@
     fs.onSnapshot(fs.collection(db, "activities"), snap => {
       activities = snap.docs.map(d => ({ id: d.id, ...d.data() })); ready.a = true; emit();
     }, onErr);
+    fs.onSnapshot(fs.collection(db, "challenges"), snap => {
+      challenges = snap.docs.map(d => ({ id: d.id, ...d.data() })); ready.c = true; emit();
+    }, onErr);
 
     return {
       mode: "online",
@@ -97,6 +110,8 @@
       saveTeam: (id, t) => fs.setDoc(fs.doc(db, "teams", id), t, { merge: true }),
       addActivity: a => fs.addDoc(fs.collection(db, "activities"), a),
       deleteActivity: id => fs.deleteDoc(fs.doc(db, "activities", id)),
+      addChallenge: c => fs.addDoc(fs.collection(db, "challenges"), c),
+      updateChallenge: (id, f) => fs.updateDoc(fs.doc(db, "challenges", id), f),
     };
   }
 
@@ -117,6 +132,21 @@
     });
   }
 
+  // "completed" = the challenged player did it; "failed" = the bettor wins
+  function betWinner(c) {
+    return c.status === "completed" ? c.to : c.status === "failed" ? c.from : null;
+  }
+
+  function betResults(id) {
+    let net = 0, wins = 0;
+    state.challenges.forEach(c => {
+      const winner = betWinner(c);
+      if (!winner || (c.from !== id && c.to !== id)) return;
+      if (winner === id) { net += c.stake; wins++; } else net -= c.stake;
+    });
+    return { net, wins };
+  }
+
   function computeTeams(stats) {
     return teamRoster().map(t => {
       const members = stats.filter(s => s.team === t.id);
@@ -132,16 +162,19 @@
       const raw = { run: 0, cycle: 0, swim: 0 };
       let pts = 0;
       acts.forEach(a => { raw[a.type] += a.km; pts += a.km * mult(a.type); });
+      const { net: bets, wins: betWins } = betResults(p.id);
+      pts = Math.max(0, pts + bets);
+      const bigBet = state.challenges.some(c => c.from === p.id && c.stake >= 10 && c.status !== "cancelled");
       const level = Math.floor(pts / CFG.kmPerLevel) + 1;
       const title = TITLES.filter(([l]) => level >= l).pop()[1];
       const pos = pts % GOAL;
       const next = CFG.route.checkpoints.find(c => c.km > pos);
       return {
-        ...p, acts, raw, pts, level, title,
+        ...p, acts, raw, pts, bets, level, title,
         xp: (pts % CFG.kmPerLevel) / CFG.kmPerLevel,
         lap: Math.floor(pts / GOAL) + 1,
         pos, next,
-        badges: BADGES.filter(b => b.test({ acts, raw, pts })),
+        badges: BADGES.filter(b => b.test({ acts, raw, pts, betWins, bigBet })),
       };
     }).sort((a, b) => b.pts - a.pts);
   }
@@ -164,7 +197,8 @@
     $("#squadTotal").textContent = `SQUAD: ${fmt(squad, 0)}`;
     $("#board").innerHTML = stats.map((p, i) => {
       const raw = Object.keys(TYPES).map(t =>
-        `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${toUnit(p.raw[t]).toFixed(1)}</span>`).join("");
+        `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${toUnit(p.raw[t]).toFixed(1)}</span>`).join("") +
+        (p.bets ? `<span class="${p.bets > 0 ? "up" : "down"}" title="Challenge winnings">🎲 ${p.bets > 0 ? "+" : ""}${toUnit(p.bets).toFixed(1)}</span>` : "");
       const nextTxt = p.next ? `NEXT: ${esc(p.next.name)} in ${fmt(p.next.km - p.pos, 0)}` : "";
       return `
         <li class="entry ${p.pts > 0 ? `rank-${i + 1}` : ""}" style="--c:${esc(p.color)}">
@@ -237,17 +271,37 @@
     $("#track").innerHTML = html;
   }
 
+  const localDate = ts => { const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+  const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
   function renderFeed() {
     const players = Object.fromEntries(roster().map(p => [p.id, p]));
-    const acts = [...state.activities]
-      .filter(a => players[a.playerId] && TYPES[a.type])
-      .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 30);
-    if (!acts.length) {
+    const items = [
+      ...state.activities
+        .filter(a => players[a.playerId] && TYPES[a.type])
+        .map(a => ({ kind: "act", date: a.date || "", ts: a.createdAt || 0, a })),
+      ...state.challenges
+        .filter(c => betWinner(c) && players[c.from] && players[c.to])
+        .map(c => ({ kind: "bet", date: localDate(c.resolvedAt || c.createdAt || 0), ts: c.resolvedAt || 0, c })),
+    ].sort((x, y) => y.date.localeCompare(x.date) || y.ts - x.ts).slice(0, 30);
+
+    if (!items.length) {
       $("#feed").innerHTML = `<li class="empty">NO QUESTS YET. INSERT COIN.</li>`;
       return;
     }
-    $("#feed").innerHTML = acts.map(a => {
+    $("#feed").innerHTML = items.map(({ kind, a, c }) => {
+      if (kind === "bet") {
+        const w = players[betWinner(c)], l = players[betWinner(c) === c.to ? c.from : c.to];
+        return `
+        <li class="feed-item bet" style="--c:${esc(w.color)}">
+          ${avatarHTML(w, "sm")}
+          <div class="feed-body">
+            <div>🎲 <b>${esc(w.name)}</b> won the bet vs <b style="color:${esc(l.color)}">${esc(l.name)}</b>
+              <span class="gain">+${toUnit(c.stake).toFixed(1)}</span> <span class="loss">−${toUnit(c.stake).toFixed(1)}</span></div>
+            <div class="feed-meta">${shortDate(localDate(c.resolvedAt || 0))} · “${esc(c.desc)}”${c.proof ? ` · ${esc(c.proof)}` : ""}</div>
+          </div>
+        </li>`;
+      }
       const p = players[a.playerId];
       const d = new Date(a.date + "T00:00:00");
       return `
@@ -261,6 +315,58 @@
           <button class="del" data-id="${esc(a.id)}" type="button" title="Delete">✕</button>
         </li>`;
     }).join("");
+  }
+
+  function challengeCard(c, P) {
+    const f = P[c.from], t = P[c.to];
+    const stake = fmt(c.stake);
+    const overdue = c.deadline && c.deadline < today() && (c.status === "pending" || c.status === "active");
+    const confirmBtn = (act, label, cls = "") => `<button type="button" class="btn sm ${cls}" data-act="${act}" data-confirm>${label}</button>`;
+    let status = "", actions = "";
+    if (c.status === "pending") {
+      status = `AWAITING ${esc(t.name)}`;
+      actions = `<button type="button" class="btn sm primary" data-act="accept">ACCEPT</button>` +
+        confirmBtn("decline", "DECLINE") + confirmBtn("cancel", "CANCEL BET", "ghost");
+    } else if (c.status === "active") {
+      status = overdue ? "OVERDUE" : "● LIVE";
+      actions = `<input class="ch-proof" maxlength="60" placeholder="Proof / time (optional)">` +
+        confirmBtn("completed", `✔ ${esc(t.name)} DID IT`, "win") + confirmBtn("failed", "✖ FAILED", "lose");
+    } else {
+      const w = P[betWinner(c)];
+      status = `${esc(w.name)} WON`;
+    }
+    const payout = betWinner(c) ? "" : `
+      <div class="ch-payout">
+        <span>DOES IT: <b style="color:${esc(t.color)}">${esc(t.name)} +${stake}</b> · ${esc(f.name)} −${stake}</span>
+        <span>FAILS: <b style="color:${esc(f.color)}">${esc(f.name)} +${stake}</b> · ${esc(t.name)} −${stake}</span>
+      </div>`;
+    return `
+      <div class="ch-card ch-${esc(c.status)} ${overdue ? "overdue" : ""}" data-id="${esc(c.id)}" style="--f:${esc(f.color)};--t:${esc(t.color)}">
+        <div class="ch-head">
+          ${avatarHTML(f, "sm")}<span class="ch-vs">VS</span>${avatarHTML(t, "sm")}
+          <span class="ch-status">${status}</span>
+          <span class="ch-stake">${stake}</span>
+        </div>
+        <p class="ch-text"><b style="color:${esc(f.color)}">${esc(f.name)}</b> bets ${stake} that
+          <b style="color:${esc(t.color)}">${esc(t.name)}</b> can't <q>${esc(c.desc)}</q></p>
+        ${c.deadline || c.proof ? `<div class="ch-meta">${c.deadline ? `⏱ BY ${shortDate(c.deadline)}` : ""}${c.proof ? ` · PROOF: ${esc(c.proof)}` : ""}</div>` : ""}
+        ${payout}
+        ${actions ? `<div class="ch-actions">${actions}</div>` : ""}
+      </div>`;
+  }
+
+  function renderChallenges() {
+    const P = Object.fromEntries(roster().map(p => [p.id, p]));
+    const cs = state.challenges.filter(c => P[c.from] && P[c.to]);
+    const newest = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
+    const live = cs.filter(c => c.status === "active").sort(newest);
+    const pending = cs.filter(c => c.status === "pending").sort(newest);
+    const done = cs.filter(c => betWinner(c)).sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0)).slice(0, 4);
+    const section = (title, list) => list.length ? `<h3 class="ch-group">${title} <span>${list.length}</span></h3>${list.map(c => challengeCard(c, P)).join("")}` : "";
+    $("#chCount").textContent = live.length + pending.length ? `${live.length} LIVE · ${pending.length} PENDING` : "";
+    $("#challenges").innerHTML =
+      section("LIVE", live) + section("PENDING", pending) + section("RECENT RESULTS", done) ||
+      `<p class="empty">NO BETS ON THE TABLE. CALL SOMEONE OUT.</p>`;
   }
 
   function renderRules() {
@@ -281,6 +387,7 @@
     renderTeams(computeTeams(stats));
     renderBoard(stats);
     renderTrack(stats);
+    renderChallenges();
     renderFeed();
     renderPlayerSelect();
     updatePreview();
@@ -459,6 +566,91 @@
     catch { toast("DELETE FAILED", "bad"); }
   });
 
+  // ---------- challenges ----------
+  function openChallenge() {
+    const opts = roster().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    const from = $("#cFrom"), to = $("#cTo");
+    from.innerHTML = to.innerHTML = opts;
+    from.value = ls.get("gbg-last-player", CFG.players[0].id);
+    to.value = CFG.players.find(p => p.id !== from.value).id;
+    $("#cUnit").value = state.unit;
+    $("#cDeadline").min = today();
+    $("#chDlg").showModal();
+  }
+
+  $("#chBtn").addEventListener("click", openChallenge);
+  $("#chClose").addEventListener("click", () => $("#chDlg").close());
+
+  $("#chForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const from = $("#cFrom").value, to = $("#cTo").value;
+    if (from === to) { toast("YOU CAN'T BET AGAINST YOURSELF", "bad"); return; }
+    const v = parseFloat($("#cStake").value);
+    const stake = Math.round(($("#cUnit").value === "mi" ? v * KM_PER_MI : v) * 1000) / 1000;
+    if (!(stake > 0) || stake > MAX_STAKE_KM) { toast(`STAKE MUST BE 0–${fmt(MAX_STAKE_KM, 0)}`, "bad"); return; }
+    const desc = $("#cDesc").value.trim().slice(0, 100);
+    if (!desc) return;
+    const btn = e.submitter || $("#chForm button[type=submit]");
+    btn.disabled = true;
+    try {
+      await state.store.addChallenge({
+        from, to, stake, desc,
+        deadline: $("#cDeadline").value || "",
+        status: "pending",
+        createdAt: Date.now(),
+      });
+      $("#chDlg").close();
+      $("#cStake").value = $("#cDesc").value = $("#cDeadline").value = "";
+      const P = Object.fromEntries(roster().map(p => [p.id, p]));
+      toast(`${P[from].name} CALLS OUT ${P[to].name}!`, "lvl");
+    } catch (err) {
+      console.error(err);
+      toast("COULDN'T SEND CHALLENGE", "bad");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("#challenges").addEventListener("click", async e => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    if (btn.hasAttribute("data-confirm") && !btn.classList.contains("armed")) {
+      const label = btn.innerHTML;
+      btn.classList.add("armed");
+      btn.textContent = "SURE?";
+      setTimeout(() => { btn.classList.remove("armed"); btn.innerHTML = label; }, 3000);
+      return;
+    }
+    const card = btn.closest(".ch-card");
+    const c = state.challenges.find(x => x.id === card.dataset.id);
+    if (!c) return;
+    const P = Object.fromEntries(roster().map(p => [p.id, p]));
+    const act = btn.dataset.act;
+    const fields = {
+      accept: { status: "active" },
+      decline: { status: "declined" },
+      cancel: { status: "cancelled" },
+      completed: { status: "completed" },
+      failed: { status: "failed" },
+    }[act];
+    if (act === "completed" || act === "failed") {
+      fields.proof = (card.querySelector(".ch-proof")?.value || "").trim().slice(0, 60);
+      fields.resolvedAt = Date.now();
+    }
+    btn.disabled = true;
+    try {
+      await state.store.updateChallenge(c.id, fields);
+      if (act === "accept") toast(`${P[c.to].name} ACCEPTS! GAME ON`, "cp");
+      else if (act === "completed") toast(`${P[c.to].name} WINS +${fmt(c.stake)}`, "good");
+      else if (act === "failed") toast(`${P[c.from].name} WINS +${fmt(c.stake)}`, "good");
+      else toast(act === "decline" ? "CHALLENGE DECLINED" : "BET CANCELLED");
+    } catch (err) {
+      console.error(err);
+      toast("UPDATE FAILED", "bad");
+      btn.disabled = false;
+    }
+  });
+
   $("#unitBtn").addEventListener("click", () => {
     state.unit = state.unit === "mi" ? "km" : "mi";
     ls.set("gbg-unit", state.unit);
@@ -490,9 +682,10 @@
       $("#mode").title = "Data is only saved in this browser. Add Firebase config in config.js to share.";
     }
 
-    state.store.subscribe(({ players, teams, activities }) => {
+    state.store.subscribe(({ players, teams, activities, challenges }) => {
       state.players = players || {};
       state.teams = teams || {};
+      state.challenges = challenges || [];
       state.activities = activities || [];
       render();
     });

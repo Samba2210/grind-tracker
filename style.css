@@ -82,17 +82,18 @@ h1, h2, h3, .btn, .pill, .rank, .score, .lvl, .badge, .lapchip, .ptitle { font-f
   max-width: 1280px; margin: 0 auto;
   display: grid; gap: 20px;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "teams" "board" "log" "map" "feed";
+  grid-template-areas: "teams" "board" "log" "challenges" "map" "feed";
 }
 @media (min-width: 960px) {
   .layout {
     grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-    grid-template-areas: "map teams" "map board" "map log" "map feed";
+    grid-template-areas: "map teams" "map board" "map log" "map challenges" "map feed";
     align-items: start;
   }
   .area-map { position: sticky; top: 16px; }
 }
 .area-teams { grid-area: teams; }
+.area-challenges { grid-area: challenges; }
 .area-board { grid-area: board; }
 .area-log { grid-area: log; }
 .area-map { grid-area: map; }
@@ -190,6 +191,44 @@ h1, h2, h3, .btn, .pill, .rank, .score, .lvl, .badge, .lapchip, .ptitle { font-f
 .team-edits { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .team-edit { display: flex; gap: 10px; padding: 12px; border: 2px solid var(--line); border-left: 4px solid var(--t); background: rgba(0,0,0,.3); }
 .team-edit .field:last-child { width: 64px; }
+
+/* ---------- challenges ---------- */
+.btn.sm { font-size: 8px; padding: 8px 10px; box-shadow: 3px 3px 0 rgba(0,240,255,.25); }
+.btn.primary.sm { box-shadow: 3px 3px 0 #7a0f66; }
+.btn.win { border-color: var(--lime); color: var(--lime); box-shadow: 3px 3px 0 rgba(57,255,20,.25); }
+.btn.lose { border-color: var(--red); color: var(--red); box-shadow: 3px 3px 0 rgba(255,51,85,.25); }
+.btn.armed { background: var(--red); border-color: var(--red); color: #fff; }
+.challenges { display: grid; gap: 10px; margin-top: 16px; }
+.ch-group { margin: 6px 0 0; font-size: 9px; color: var(--dim); }
+.ch-group span { color: var(--amber); }
+.ch-card {
+  display: grid; gap: 8px; padding: 12px;
+  background: rgba(0,0,0,.35); border: 2px solid var(--line);
+  border-image: linear-gradient(90deg, var(--f), var(--t)) 1;
+}
+.ch-card.ch-active { box-shadow: 0 0 16px rgba(255,43,214,.18) inset; }
+.ch-card.ch-completed, .ch-card.ch-failed { opacity: .75; }
+.ch-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ch-vs { font-family: var(--pixel); font-size: 8px; color: var(--mag); }
+.ch-status { font-family: var(--pixel); font-size: 8px; color: var(--dim); margin-left: 6px; }
+.ch-active .ch-status { color: var(--lime); animation: blink 1.4s steps(2) infinite; }
+.overdue .ch-status { color: var(--red); }
+.ch-completed .ch-status, .ch-failed .ch-status { color: var(--amber); }
+.ch-stake { margin-left: auto; font-family: var(--pixel); font-size: 10px; color: var(--amber); text-shadow: 0 0 8px rgba(255,184,0,.6); }
+.ch-text { margin: 0; font-size: 15px; line-height: 1.4; }
+.ch-text q { color: #fff; font-weight: 700; }
+.ch-meta { font-size: 12px; color: var(--dim); }
+.ch-payout { display: grid; gap: 2px; font-size: 12px; color: var(--dim); padding: 6px 8px; background: rgba(255,255,255,.03); border-left: 2px solid var(--amber); }
+.ch-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ch-proof { flex: 1 1 100%; font-size: 14px; padding: 8px 10px; }
+.ch-rules { margin: 0; font-size: 13px; color: var(--dim); line-height: 1.5; }
+.ch-rules b { color: var(--amber); }
+.dlg-narrow { width: min(520px, calc(100vw - 32px)); }
+.dlg-narrow form { display: grid; gap: 14px; }
+.challenges .empty { margin: 0; }
+.meta .up { color: var(--lime); }
+.meta .down { color: var(--red); }
+.loss { font-family: var(--pixel); font-size: 9px; color: var(--red); }
 
 /* ---------- map ---------- */
 .track {
