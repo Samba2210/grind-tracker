@@ -28,10 +28,7 @@
     { id: "roll",   label: "HIGH ROLLER", tip: "Staked 10 km+ on a challenge", test: s => s.bigBet },
   ];
 
-  // A stake can't exceed the lower of the two players' totals (so nobody gets wiped out early),
-  // but small bets are always allowed. Losses can push a total below zero: that's debt.
-  const MAX_STAKE_KM = 50;
-  const MIN_STAKE_CAP_KM = 5;
+  // No stake cap: losses can push a total below zero, and that's debt.
 
   // ---------- helpers ----------
   const $ = (s, el = document) => el.querySelector(s);
@@ -576,18 +573,6 @@
   });
 
   // ---------- challenges ----------
-  function stakeCap(a, b) {
-    const stats = computeStats();
-    const pts = id => stats.find(s => s.id === id)?.pts || 0;
-    return Math.floor(Math.min(MAX_STAKE_KM, Math.max(MIN_STAKE_CAP_KM, Math.min(pts(a), pts(b)))) * 10) / 10;
-  }
-
-  function updateStakeCap() {
-    const cap = stakeCap($("#cFrom").value, $("#cTo").value);
-    $("#cStake").max = cap;
-    $("#cCap").textContent = `MAX ${fmt(cap)}`;
-  }
-
   function openChallenge() {
     const opts = roster().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const from = $("#cFrom"), to = $("#cTo");
@@ -595,13 +580,10 @@
     from.value = ls.get("gbg-last-player", CFG.players[0].id);
     to.value = CFG.players.find(p => p.id !== from.value).id;
     $("#cDeadline").min = today();
-    updateStakeCap();
     $("#chDlg").showModal();
   }
 
   $("#chBtn").addEventListener("click", openChallenge);
-  $("#cFrom").addEventListener("change", updateStakeCap);
-  $("#cTo").addEventListener("change", updateStakeCap);
   $("#chClose").addEventListener("click", () => $("#chDlg").close());
 
   $("#chForm").addEventListener("submit", async e => {
@@ -610,8 +592,7 @@
     if (from === to) { toast("YOU CAN'T BET AGAINST YOURSELF", "bad"); return; }
     const v = parseFloat($("#cStake").value);
     const stake = Math.round(v * 1000) / 1000;
-    const cap = stakeCap(from, to);
-    if (!(stake > 0) || stake > cap) { toast(`STAKE MUST BE 0.1–${fmt(cap)}`, "bad"); return; }
+    if (!(stake > 0)) { toast("STAKE MUST BE MORE THAN 0", "bad"); return; }
     const desc = $("#cDesc").value.trim().slice(0, 100);
     if (!desc) return;
     const btn = e.submitter || $("#chForm button[type=submit]");

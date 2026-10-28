@@ -30,7 +30,7 @@ service cloud.firestore {
         && request.resource.data.from != request.resource.data.to
         && request.resource.data.stake is number
         && request.resource.data.stake > 0
-        && request.resource.data.stake <= 50
+        && request.resource.data.stake <= 100000
         && request.resource.data.desc is string
         && request.resource.data.desc.size() > 0
         && request.resource.data.desc.size() <= 100

@@ -113,14 +113,14 @@
         <label class="field grow"><span>BETTOR (YOU)</span><select id="cFrom" required></select></label>
         <label class="field grow"><span>CALLING OUT</span><select id="cTo" required></select></label>
       </div>
-      <label class="field"><span>STAKE (KM) · <b class="cap" id="cCap"></b></span>
-        <input id="cStake" type="number" step="0.1" min="0.1" max="5" inputmode="decimal" placeholder="5" required>
+      <label class="field"><span>STAKE (KM)</span>
+        <input id="cStake" type="number" step="0.1" min="0.1" inputmode="decimal" placeholder="5" required>
       </label>
       <label class="field"><span>THEY CAN'T…</span>
         <input id="cDesc" maxlength="100" placeholder="run a sub 31 min 5k" required>
       </label>
       <label class="field"><span>DEADLINE <em>(OPTIONAL)</em></span><input id="cDeadline" type="date"></label>
-      <p class="ch-rules">If they do it, <b>they win</b> the stake from you. If they fail, <b>you win</b> it from them. They have to accept first. Stakes are capped at the lower of your two totals (always at least 5 km), and losing can put you in debt.</p>
+      <p class="ch-rules">If they do it, <b>they win</b> the stake from you. If they fail, <b>you win</b> it from them. They have to accept first. No limits: losing can put you in debt.</p>
       <button class="btn primary big" type="submit">⚔ SEND CHALLENGE</button>
     </form>
   </dialog>
