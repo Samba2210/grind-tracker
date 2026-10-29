@@ -332,6 +332,7 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .pb-table td.none { color: var(--line); }
 .pb-hint { margin: 8px 0 0; font-size: 12px; color: var(--dim); }
 .feed-body .time { color: #fff; }
+.feed-body .scaled { font-size: 12px; color: var(--dim); white-space: nowrap; }
 .tbtn { margin-left: 6px; padding: 2px 6px; cursor: pointer; background: none; border: 1px solid var(--line); color: var(--amber); font-family: var(--pixel); font-size: 7px; }
 .tbtn:hover { border-color: var(--amber); }
 .time-edit { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
@@ -461,6 +462,21 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .mk-name { font-family: var(--pixel); font-size: 7px; color: var(--c); background: rgba(0,0,0,.8); padding: 3px 4px; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marker .lap { position: absolute; bottom: 0; right: -14px; font-family: var(--pixel); font-size: 7px; padding: 2px 3px; background: var(--amber); color: #000; }
 @keyframes idle { 50% { translate: 0 -3px; } }
+
+/* team banner: a pole in the team colour with a flag showing the combined distance */
+.team-flag { position: absolute; z-index: 1; width: 0; pointer-events: auto; transition: left 1.2s cubic-bezier(.4,.1,.3,1), bottom 1.2s ease; }
+.team-flag .tf-pole { position: absolute; left: -2px; bottom: 0; width: 4px; height: 104px; background: var(--t); box-shadow: 0 0 8px var(--t); }
+.team-flag .tf-banner {
+  position: absolute; left: 2px; bottom: 66px; white-space: nowrap;
+  font-family: var(--pixel); font-size: 7px; line-height: 1.5; color: #fff; background: var(--t);
+  padding: 4px 12px 4px 6px; clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 50%, 100% 100%, 0 100%);
+  transform-origin: left center; animation: banner 1.6s ease-in-out infinite;
+  text-shadow: 1px 1px 0 rgba(0,0,0,.5);
+}
+.team-flag .tf-banner small { display: block; font-size: 6px; opacity: .85; }
+.team-flag.high .tf-pole { height: 140px; }
+.team-flag.high .tf-banner { bottom: 102px; }
+@keyframes banner { 50% { transform: skewY(-3deg) scaleX(.96); } }
 @keyframes hop { 50% { translate: 0 -10px; rotate: 6deg; } }
 .marker.sunk .avatar { filter: saturate(.6) brightness(.85); animation: sink-bob 3s ease-in-out infinite; }
 .marker.sunk .mk-name { background: var(--red); color: #fff; }
@@ -483,6 +499,7 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .mini { position: absolute; left: 8px; right: 8px; bottom: 6px; height: 10px; z-index: 5; cursor: pointer; background: rgba(0,0,0,.6); border: 1px solid var(--line); }
 .mini-view { position: absolute; top: -2px; bottom: -2px; border: 1px solid rgba(255,255,255,.7); background: rgba(255,255,255,.08); pointer-events: none; }
 .mini-cp { position: absolute; top: 2px; width: 1px; height: 4px; background: var(--dim); }
+.mini-team { position: absolute; top: -4px; width: 3px; height: 16px; translate: -50% 0; background: var(--t); box-shadow: 0 0 6px var(--t); }
 .mini-dot { position: absolute; top: 1px; width: 6px; height: 6px; translate: -50% 0; background: var(--c); box-shadow: 0 0 6px var(--c); }
 
 @media (max-width: 700px) {
@@ -490,7 +507,7 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
   .hud-me { max-width: none; flex: 1 1 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .marker .avatar, .sea::before, .shark, .gem, .cp.reached .flag, .marker.me::after { animation: none; }
+  .marker .avatar, .sea::before, .shark, .gem, .cp.reached .flag, .marker.me::after, .team-flag .tf-banner { animation: none; }
 }
 
 /* ---------- form ---------- */

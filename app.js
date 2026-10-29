@@ -102,18 +102,29 @@
   };
   const milestoneFor = (type, km) => (CFG.milestones?.[type] || []).find(m => km >= m.km * 0.98 && km <= m.km * 1.05);
 
-  // best time per player per milestone: { [playerId]: { [label]: { secs, date } } }
+  // A time over a distance near a milestone, projected to the exact milestone distance with
+  // Riegel's formula (t2 = t1 × (d2/d1)^1.06), so a 5.08 km run and a 4.95 km run compare fairly as 5Ks.
+  function milestoneTime(type, km, secs) {
+    const m = secs > 0 && milestoneFor(type, km);
+    return m ? { m, secs: Math.round(secs * Math.pow(m.km / km, 1.06)) } : null;
+  }
+
+  // best time per player per milestone: { [playerId]: { [label]: { secs, raw, km, date } } }
   function personalBests(type) {
     const best = {};
     state.activities.forEach(a => {
-      if (a.type !== type || !(a.secs > 0)) return;
-      const m = milestoneFor(type, a.km);
-      if (!m) return;
+      if (a.type !== type) return;
+      const t = milestoneTime(type, a.km, a.secs);
+      if (!t) return;
       const mine = best[a.playerId] = best[a.playerId] || {};
-      if (!mine[m.label] || a.secs < mine[m.label].secs) mine[m.label] = { secs: a.secs, date: a.date };
+      if (!mine[t.m.label] || t.secs < mine[t.m.label].secs) mine[t.m.label] = { secs: t.secs, raw: a.secs, km: a.km, date: a.date };
     });
     return best;
   }
+  const isNewPB = (type, playerId, t) => {
+    const old = t && personalBests(type)[playerId]?.[t.m.label];
+    return !!t && (!old || t.secs < old.secs);
+  };
 
   const fmt = (km, dp = 1) => `${km.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })} KM`;
 
@@ -537,6 +548,24 @@
     });
     layer.querySelectorAll("[data-mk]").forEach(el => { if (!seen.has(el.dataset.mk)) el.remove(); });
 
+    // team banners: planted at each team's combined distance, behind the players
+    const teams = computeTeams(stats).filter(t => t.members.length);
+    const flags = teams.length < 2 ? [] : teams.map(t => {
+      const progress = Math.max(0, t.pts);
+      return { t, pos: progress % GOAL, lap: Math.floor(progress / GOAL) + 1, x: mapX(progress % GOAL) };
+    }).sort((a, b) => a.x - b.x);
+    flags.forEach((f, i) => { f.high = i > 0 && f.x - flags[i - 1].x < 120 && !flags[i - 1].high; });
+    const flagIds = new Set(flags.map(f => f.t.id));
+    flags.forEach(({ t, pos, lap, x, high }) => {
+      let el = layer.querySelector(`[data-team="${t.id}"]`);
+      if (!el) { el = document.createElement("div"); el.dataset.team = t.id; layer.prepend(el); }
+      el.className = `team-flag ${high ? "high" : ""}`;
+      el.style.cssText = `left:${x}px;bottom:${groundAt(pos)}px;--t:${t.color}`;
+      el.title = `${t.name}: ${fmt(t.pts)} combined (${t.members.map(m => m.name).join(" + ")})`;
+      el.innerHTML = `<i class="tf-pole"></i><span class="tf-banner">${esc(t.name)}<small>${fmt(t.pts, 0)}${lap > 1 ? ` · L${lap}` : ""}</small></span>`;
+    });
+    layer.querySelectorAll("[data-team]").forEach(el => { if (!flagIds.has(el.dataset.team)) el.remove(); });
+
     // HUD
     if (me) {
       $("#hudMe").innerHTML = `${avatarHTML(me, "sm")}<div><b style="color:${esc(me.color)}">${esc(me.name)}</b> ${fmt(me.pts)}
@@ -547,6 +576,7 @@
     const W = worldW();
     $("#miniDots").innerHTML =
       CFG.route.checkpoints.map(c => `<i class="mini-cp" style="left:${(mapX(c.km) / W) * 100}%"></i>`).join("") +
+      flags.map(({ t, x }) => `<i class="mini-team" style="left:${(x / W) * 100}%;--t:${esc(t.color)}"></i>`).join("") +
       spots.map(({ p, x }) => `<i class="mini-dot" style="left:${(x / W) * 100}%;--c:${esc(p.color)}"></i>`).join("");
 
     // camera: fly to the followed player when they move or the target changes
@@ -561,6 +591,12 @@
 
   const localDate = ts => { const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
   const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
+  // "≈ 5K 24:52" when a timed activity was near (but not exactly) a milestone distance
+  const scaledNote = a => {
+    const t = !TYPES[a.type].flat && milestoneTime(a.type, a.km, a.secs);
+    return t && t.secs !== a.secs ? ` <span class="scaled" title="Projected to exactly ${esc(t.m.label)} for the PB board">≈ ${esc(t.m.label)} ${fmtTime(t.secs)}</span>` : "";
+  };
 
   function renderFeed() {
     const players = Object.fromEntries(roster().map(p => [p.id, p]));
@@ -601,7 +637,7 @@
         <li class="feed-item" style="--c:${esc(p.color)}">
           ${avatarHTML(p, "sm")}
           <div class="feed-body">
-            <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb}${TYPES[a.type].flat ? "" : ` ${fmt(a.km)}`}${a.secs > 0 ? ` in <b class="time">${fmtTime(a.secs)}</b>` : ""} ${TYPES[a.type].icon}
+            <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb}${TYPES[a.type].flat ? "" : ` ${fmt(a.km)}`}${a.secs > 0 ? ` in <b class="time">${fmtTime(a.secs)}</b>` : ""} ${TYPES[a.type].icon}${scaledNote(a)}
               <span class="gain">+${points(a).toFixed(1)}</span></div>
             <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}
               ${canTime && !editing ? `<button class="tbtn" type="button" data-time="${esc(a.id)}">${a.secs ? "EDIT TIME" : "+ ADD TIME"}</button>` : ""}</div>
@@ -712,7 +748,7 @@
       const times = players.map(p => best[p.id]?.[m.label]);
       const top = Math.min(...times.filter(Boolean).map(t => t.secs));
       return `<tr><th>${esc(m.label)}</th>${times.map((t, i) => t
-        ? `<td class="${t.secs === top ? "fastest" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)}${t.secs === top ? " · FASTEST" : ""}">${fmtTime(t.secs)}</td>`
+        ? `<td class="${t.secs === top ? "fastest" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)} · ${fmt(t.km, 2)} in ${fmtTime(t.raw)}${t.secs === top ? " · FASTEST" : ""}">${fmtTime(t.secs)}</td>`
         : `<td class="none">—</td>`).join("")}</tr>`;
     }).join("");
     $("#pbs").innerHTML = `
@@ -723,7 +759,7 @@
         <thead><tr><th></th>${players.map(p => `<th title="${esc(p.name)}">${avatarHTML(p, "sm")}</th>`).join("")}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="pb-hint">Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Know their times before you bet.</p>`;
+      <p class="pb-hint">Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Distances close to a milestone are scaled to it. Know their times before you bet.</p>`;
   }
 
   $("#pbs").addEventListener("click", e => {
@@ -1024,8 +1060,8 @@
       const km = TYPES[type].flat ? 1 : Math.round(v * 1000) / 1000;
       const gained = points({ type, km });
       const secs = TYPES[type].flat ? null : parseTime($("#fTime").value);
-      const milestone = secs && milestoneFor(type, km);
-      const oldPB = milestone && personalBests(type)[playerId]?.[milestone.label];
+      const pb = milestoneTime(type, km, secs);
+      const newPB = isNewPB(type, playerId, pb);
 
       const statsBefore = computeStats();
       const before = statsBefore.find(s => s.id === playerId);
@@ -1042,7 +1078,7 @@
         });
         ls.set("gbg-last-player", playerId);
         toast(`+${fmt(gained)} ${TYPES[type].icon}`, "good");
-        if (milestone && (!oldPB || secs < oldPB.secs)) toast(`NEW PB! ${milestone.label} ${TYPES[type].label} ${fmtTime(secs)}`, "lvl");
+        if (newPB) toast(`NEW PB! ${pb.m.label} ${TYPES[type].label} ${fmtTime(pb.secs)}`, "lvl");
 
         const afterPts = before.pts + gained;
         if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1}`, "lvl");
@@ -1106,15 +1142,15 @@
     const raw = form.querySelector(".time-input").value.trim();
     const secs = raw ? parseTime(raw) : null;
     if (raw && !secs) { toast("USE MM:SS OR H:MM:SS", "bad"); return; }
-    const milestone = secs && milestoneFor(a.type, a.km);
-    const oldPB = milestone && personalBests(a.type)[a.playerId]?.[milestone.label];
+    const pb = milestoneTime(a.type, a.km, secs);
+    const newPB = isNewPB(a.type, a.playerId, pb);
     form.querySelectorAll("button").forEach(b => { b.disabled = true; });
     try {
       await state.store.setActivityTime(a.id, secs);
       state.timeEdit = null;
       renderFeed();
       toast(secs ? `TIME SAVED: ${fmtTime(secs)}` : "TIME REMOVED", "good");
-      if (milestone && (!oldPB || secs < oldPB.secs)) toast(`NEW PB! ${milestone.label} ${TYPES[a.type].label} ${fmtTime(secs)}`, "lvl");
+      if (newPB) toast(`NEW PB! ${pb.m.label} ${TYPES[a.type].label} ${fmtTime(pb.secs)}`, "lvl");
     } catch (err) {
       console.error(err);
       toast("COULDN'T SAVE THE TIME", "bad");
