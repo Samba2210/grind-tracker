@@ -38,6 +38,11 @@ window.APP_CONFIG = {
     swim:  [{ label: "400M", km: 0.4 }, { label: "1K", km: 1 }, { label: "1.5K", km: 1.5 }, { label: "3.8K", km: 3.8 }],
   },
 
+  // Bonus adjusted km for holding the fastest time in each milestone event (the PB crown).
+  // The crown is only up for grabs once at least `pbBonusMinTimes` players have posted a time.
+  pbBonus: 5,
+  pbBonusMinTimes: 2,
+
   // Adjusted km per level on the leaderboard
   kmPerLevel: 20,
 

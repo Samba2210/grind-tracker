@@ -330,6 +330,9 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .pb-table td { color: var(--c); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .pb-table td.fastest { color: #000; background: var(--c); }
 .pb-table td.none { color: var(--line); }
+.pb-table .crown { display: block; font-family: var(--pixel); font-size: 7px; margin-top: 3px; }
+.pb-hint .pb-bonus { color: var(--amber); font-weight: 700; }
+.meta .crowns { color: var(--amber); }
 .pb-hint { margin: 8px 0 0; font-size: 12px; color: var(--dim); }
 .feed-body .time { color: #fff; }
 .feed-body .scaled { font-size: 12px; color: var(--dim); white-space: nowrap; }

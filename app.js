@@ -121,6 +121,34 @@
     });
     return best;
   }
+  const PB_TYPES = Object.keys(TYPES).filter(t => CFG.milestones?.[t]?.length);
+  const PB_BONUS = CFG.pbBonus ?? 5;
+  const PB_MIN = CFG.pbBonusMinTimes ?? 2;
+
+  // who holds the fastest time in each event: [{ type, label, playerId, secs }]
+  // a tie goes to whoever set the time first
+  function pbCrowns() {
+    const crowns = [];
+    PB_TYPES.forEach(type => {
+      const best = personalBests(type);
+      CFG.milestones[type].forEach(m => {
+        const times = Object.entries(best).map(([playerId, b]) => b[m.label] && { playerId, ...b[m.label] }).filter(Boolean);
+        if (times.length < PB_MIN) return;
+        const top = times.sort((x, y) => x.secs - y.secs || x.date.localeCompare(y.date))[0];
+        crowns.push({ type, label: m.label, playerId: top.playerId, secs: top.secs });
+      });
+    });
+    return crowns;
+  }
+  // would this time take the crown off someone else?
+  const takesCrown = (type, playerId, t) => {
+    if (!t) return false;
+    const crown = pbCrowns().find(c => c.type === type && c.label === t.m.label);
+    if (crown) return crown.playerId !== playerId && t.secs < crown.secs;
+    const others = Object.entries(personalBests(type)).filter(([id, b]) => id !== playerId && b[t.m.label]);
+    return others.length + 1 >= PB_MIN && others.every(([, b]) => t.secs < b[t.m.label].secs);
+  };
+
   const isNewPB = (type, playerId, t) => {
     const old = t && personalBests(type)[playerId]?.[t.m.label];
     return !!t && (!old || t.secs < old.secs);
@@ -267,6 +295,7 @@
   const teamChip = t => t ? `<span class="teamchip" style="--t:${esc(t.color)}">${esc(t.name)}</span>` : "";
 
   function computeStats() {
+    const crowns = pbCrowns();
     return roster().map(p => {
       const acts = state.activities.filter(a => a.playerId === p.id && TYPES[a.type]);
       const raw = Object.fromEntries(Object.keys(TYPES).map(t => [t, 0]));
@@ -274,6 +303,9 @@
       acts.forEach(a => { raw[a.type] += a.km; pts += points(a); });
       const { net: bets, wins: betWins } = betResults(p.id);
       pts += bets;
+      const myCrowns = crowns.filter(c => c.playerId === p.id);
+      const pbBonus = myCrowns.length * PB_BONUS;
+      pts += pbBonus;
       const progress = Math.max(0, pts); // debt keeps you parked at Land's End
       const bigBet = state.challenges.some(c => c.from === p.id && betValue(c) >= 10 && c.status !== "cancelled");
       const level = Math.floor(progress / CFG.kmPerLevel) + 1;
@@ -281,7 +313,7 @@
       const pos = progress % GOAL;
       const next = CFG.route.checkpoints.find(c => c.km > pos);
       return {
-        ...p, acts, raw, pts, bets, level, title,
+        ...p, acts, raw, pts, bets, level, title, crowns: myCrowns, pbBonus,
         debt: pts < 0,
         xp: (progress % CFG.kmPerLevel) / CFG.kmPerLevel,
         lap: Math.floor(progress / GOAL) + 1,
@@ -313,7 +345,8 @@
         TYPES[t].flat
           ? `<span title="Golf with Friends wins">${TYPES[t].icon} ${p.raw[t]}W</span>`
           : `<span title="${TYPES[t].label} (raw)">${TYPES[t].icon} ${p.raw[t].toFixed(1)}</span>`).join("") +
-        (p.bets ? `<span class="${p.bets > 0 ? "up" : "down"}" title="Challenge winnings">🎲 ${p.bets > 0 ? "+" : ""}${p.bets.toFixed(1)}</span>` : "");
+        (p.bets ? `<span class="${p.bets > 0 ? "up" : "down"}" title="Challenge winnings">🎲 ${p.bets > 0 ? "+" : ""}${p.bets.toFixed(1)}</span>` : "") +
+        (p.pbBonus ? `<span class="crowns" title="Fastest in: ${esc(p.crowns.map(c => `${c.label} ${TYPES[c.type].label}`).join(", "))}">♛ ${p.crowns.length} · +${p.pbBonus.toFixed(1)}</span>` : "");
       const nextTxt = p.debt
         ? `IN DEBT: run off ${fmt(-p.pts)} to get moving`
         : p.next ? `NEXT: ${esc(p.next.name)} in ${fmt(p.next.km - p.pos, 0)}` : "";
@@ -737,19 +770,21 @@
       `<p class="empty">NO BETS ON THE TABLE. CALL SOMEONE OUT.</p>`;
   }
 
-  const PB_TYPES = Object.keys(TYPES).filter(t => CFG.milestones?.[t]?.length);
   function renderPBs() {
     if (!PB_TYPES.includes(state.pbType)) state.pbType = PB_TYPES[0];
     const type = state.pbType;
     if (!type) { $("#pbs").innerHTML = ""; return; }
     const players = roster();
     const best = personalBests(type);
+    const crowns = pbCrowns().filter(c => c.type === type);
     const rows = CFG.milestones[type].map(m => {
       const times = players.map(p => best[p.id]?.[m.label]);
-      const top = Math.min(...times.filter(Boolean).map(t => t.secs));
-      return `<tr><th>${esc(m.label)}</th>${times.map((t, i) => t
-        ? `<td class="${t.secs === top ? "fastest" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)} · ${fmt(t.km, 2)} in ${fmtTime(t.raw)}${t.secs === top ? " · FASTEST" : ""}">${fmtTime(t.secs)}</td>`
-        : `<td class="none">—</td>`).join("")}</tr>`;
+      const crown = crowns.find(c => c.label === m.label);
+      return `<tr><th>${esc(m.label)}</th>${times.map((t, i) => {
+        if (!t) return `<td class="none">—</td>`;
+        const king = crown?.playerId === players[i].id;
+        return `<td class="${king ? "fastest" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)} · ${fmt(t.km, 2)} in ${fmtTime(t.raw)}${king ? ` · FASTEST: +${PB_BONUS} KM` : ""}">${fmtTime(t.secs)}${king ? `<span class="crown">♛ +${PB_BONUS}</span>` : ""}</td>`;
+      }).join("")}</tr>`;
     }).join("");
     $("#pbs").innerHTML = `
       <div class="pb-head"><h3>PB BOARD</h3>
@@ -759,7 +794,7 @@
         <thead><tr><th></th>${players.map(p => `<th title="${esc(p.name)}">${avatarHTML(p, "sm")}</th>`).join("")}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="pb-hint">Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Distances close to a milestone are scaled to it. Know their times before you bet.</p>`;
+      <p class="pb-hint"><b class="pb-bonus">♛ FASTEST IN EACH EVENT EARNS +${PB_BONUS} KM</b> (once ${PB_MIN}+ players have a time). Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Distances close to a milestone are scaled to it.</p>`;
   }
 
   $("#pbs").addEventListener("click", e => {
@@ -1062,6 +1097,7 @@
       const secs = TYPES[type].flat ? null : parseTime($("#fTime").value);
       const pb = milestoneTime(type, km, secs);
       const newPB = isNewPB(type, playerId, pb);
+      const crown = takesCrown(type, playerId, pb);
 
       const statsBefore = computeStats();
       const before = statsBefore.find(s => s.id === playerId);
@@ -1079,6 +1115,7 @@
         ls.set("gbg-last-player", playerId);
         toast(`+${fmt(gained)} ${TYPES[type].icon}`, "good");
         if (newPB) toast(`NEW PB! ${pb.m.label} ${TYPES[type].label} ${fmtTime(pb.secs)}`, "lvl");
+        if (crown) toast(`♛ FASTEST ${pb.m.label}! +${PB_BONUS} KM`, "cp");
 
         const afterPts = before.pts + gained;
         if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1}`, "lvl");
@@ -1144,6 +1181,7 @@
     if (raw && !secs) { toast("USE MM:SS OR H:MM:SS", "bad"); return; }
     const pb = milestoneTime(a.type, a.km, secs);
     const newPB = isNewPB(a.type, a.playerId, pb);
+    const crown = takesCrown(a.type, a.playerId, pb);
     form.querySelectorAll("button").forEach(b => { b.disabled = true; });
     try {
       await state.store.setActivityTime(a.id, secs);
@@ -1151,6 +1189,7 @@
       renderFeed();
       toast(secs ? `TIME SAVED: ${fmtTime(secs)}` : "TIME REMOVED", "good");
       if (newPB) toast(`NEW PB! ${pb.m.label} ${TYPES[a.type].label} ${fmtTime(pb.secs)}`, "lvl");
+      if (crown) toast(`♛ FASTEST ${pb.m.label}! +${PB_BONUS} KM`, "cp");
     } catch (err) {
       console.error(err);
       toast("COULDN'T SAVE THE TIME", "bad");

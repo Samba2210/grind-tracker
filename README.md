@@ -7,7 +7,7 @@ A retro-arcade exercise tracker for 4 mates racing (virtually) from **Land's End
 - Leaderboard with levels, titles, XP bars and badges
 - Finish the route → LAP 2
 - Teams, and challenges: bet km that a mate can't hit a target. Winner takes the stake, and losers can go into debt
-- Add a finish time to an activity to set PBs at milestone distances (5K, 10K, half marathon…), shown on the PB board in the bets tab. A distance close to a milestone (−2% to +5%) has its time scaled to the exact milestone with Riegel's formula, so a 5.08 km run counts as a fair 5K
+- Add a finish time to an activity to set PBs at milestone distances (5K, 10K, half marathon…), shown on the PB board in the bets tab. The fastest time in each event earns a +5 km bonus (♛), once at least 2 players have posted a time. A distance close to a milestone (−2% to +5%) has its time scaled to the exact milestone with Riegel's formula, so a 5.08 km run counts as a fair 5K
 - Each team has a banner on the map at its combined distance
 
 Tweak multipliers, player defaults and checkpoints in `config.js`.
