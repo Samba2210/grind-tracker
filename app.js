@@ -794,7 +794,7 @@
         <thead><tr><th></th>${players.map(p => `<th title="${esc(p.name)}">${avatarHTML(p, "sm")}</th>`).join("")}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="pb-hint"><b class="pb-bonus">♛ FASTEST IN EACH EVENT EARNS +${PB_BONUS} KM</b> (once ${PB_MIN}+ players have a time). Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Distances close to a milestone are scaled to it.</p>`;
+      <p class="pb-hint"><b class="pb-bonus">♛ FASTEST IN EACH EVENT EARNS +${PB_BONUS} KM</b>${PB_MIN > 1 ? ` (once ${PB_MIN}+ players have a time)` : ""}. Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Distances close to a milestone are scaled to it.</p>`;
   }
 
   $("#pbs").addEventListener("click", e => {

@@ -39,9 +39,9 @@ window.APP_CONFIG = {
   },
 
   // Bonus adjusted km for holding the fastest time in each milestone event (the PB crown).
-  // The crown is only up for grabs once at least `pbBonusMinTimes` players have posted a time.
+  // The crown counts once at least `pbBonusMinTimes` players have posted a time (1 = a lone time still earns it).
   pbBonus: 5,
-  pbBonusMinTimes: 2,
+  pbBonusMinTimes: 1,
 
   // Adjusted km per level on the leaderboard
   kmPerLevel: 20,
