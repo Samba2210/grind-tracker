@@ -144,7 +144,12 @@ service cloud.firestore {
         && request.resource.data.note is string
         && request.resource.data.note.size() <= 80;
       allow delete: if isAdmin() || isPlayer(resource.data.playerId);
-      allow update: if false;
+      // the only change allowed later: a player adding, fixing or removing the time on their own activity
+      allow update: if isPlayer(resource.data.playerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['secs'])
+        && resource.data.type != 'golf'
+        && (!('secs' in request.resource.data) || (request.resource.data.secs is number
+          && request.resource.data.secs > 0 && request.resource.data.secs <= 172800));
     }
   }
 }

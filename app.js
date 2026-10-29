@@ -69,6 +69,8 @@
     claimDismissed: false,
     follow: ls.get("gbg-follow", null), // whose player the map camera follows
     pbType: ls.get("gbg-pb", "run"),    // which sport the PB board shows
+    feedLimit: 30,                      // how many feed items to show ("SHOW MORE" adds more)
+    timeEdit: null,                     // { id, value } while someone is adding a time to an old activity
     store: null,
   };
 
@@ -132,6 +134,14 @@
       async saveTeam(id, t) { data.teams[id] = { ...data.teams[id], ...t }; emit(); },
       async addActivity(a) { data.activities.push({ ...a, id: uid() }); emit(); },
       async deleteActivity(id) { data.activities = data.activities.filter(a => a.id !== id); emit(); },
+      async setActivityTime(id, secs) {
+        data.activities = data.activities.map(a => {
+          if (a.id !== id) return a;
+          const { secs: _, ...rest } = a;
+          return secs ? { ...rest, secs } : rest;
+        });
+        emit();
+      },
       async addChallenge(c) { data.challenges.push({ ...c, id: uid() }); emit(); },
       async updateChallenge(id, f) { data.challenges = data.challenges.map(c => c.id === id ? { ...c, ...f } : c); emit(); },
       async deleteChallenge(id) { data.challenges = data.challenges.filter(c => c.id !== id); emit(); },
@@ -197,6 +207,7 @@
       saveTeam: (id, t) => fs.setDoc(fs.doc(db, "teams", id), t, { merge: true }),
       addActivity: a => fs.addDoc(fs.collection(db, "activities"), a),
       deleteActivity: id => fs.deleteDoc(fs.doc(db, "activities", id)),
+      setActivityTime: (id, secs) => fs.updateDoc(fs.doc(db, "activities", id), { secs: secs || fs.deleteField() }),
       addChallenge: c => fs.addDoc(fs.collection(db, "challenges"), c),
       updateChallenge: (id, f) => fs.updateDoc(fs.doc(db, "challenges", id), f),
       deleteChallenge: id => fs.deleteDoc(fs.doc(db, "challenges", id)),
@@ -560,7 +571,9 @@
       ...state.challenges
         .filter(c => betWinner(c) && players[c.from] && players[c.to])
         .map(c => ({ kind: "bet", date: localDate(c.resolvedAt || c.createdAt || 0), ts: c.resolvedAt || 0, c })),
-    ].sort((x, y) => y.date.localeCompare(x.date) || y.ts - x.ts).slice(0, 30);
+    ].sort((x, y) => y.date.localeCompare(x.date) || y.ts - x.ts);
+    const more = items.length > state.feedLimit;
+    items.length = Math.min(items.length, state.feedLimit);
 
     if (!items.length) {
       $("#feed").innerHTML = `<li class="empty">NO QUESTS YET. INSERT COIN.</li>`;
@@ -581,17 +594,27 @@
       }
       const p = players[a.playerId];
       const d = new Date(a.date + "T00:00:00");
+      // only the player themselves can time their own activity (golf wins have no time)
+      const canTime = !TYPES[a.type].flat && (access.local || access.me === a.playerId);
+      const editing = canTime && state.timeEdit?.id === a.id;
       return `
         <li class="feed-item" style="--c:${esc(p.color)}">
           ${avatarHTML(p, "sm")}
           <div class="feed-body">
             <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb}${TYPES[a.type].flat ? "" : ` ${fmt(a.km)}`}${a.secs > 0 ? ` in <b class="time">${fmtTime(a.secs)}</b>` : ""} ${TYPES[a.type].icon}
               <span class="gain">+${points(a).toFixed(1)}</span></div>
-            <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}</div>
+            <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}
+              ${canTime && !editing ? `<button class="tbtn" type="button" data-time="${esc(a.id)}">${a.secs ? "EDIT TIME" : "+ ADD TIME"}</button>` : ""}</div>
+            ${editing ? `
+              <form class="time-edit" data-id="${esc(a.id)}">
+                <input class="time-input" maxlength="9" placeholder="30:12" value="${esc(state.timeEdit.value)}" aria-label="Time">
+                <button class="btn sm primary" type="submit">SAVE</button>
+                <button class="btn sm ghost" type="button" data-time-cancel>CANCEL</button>
+              </form>` : ""}
           </div>
           ${access.owns(a.playerId) ? `<button class="del" data-id="${esc(a.id)}" type="button" title="Delete">✕</button>` : ""}
         </li>`;
-    }).join("");
+    }).join("") + (more ? `<li><button class="btn sm ghost more" type="button" data-more>SHOW MORE</button></li>` : "");
   }
 
   // Bet flow: pending -> active -> (claimed -> confirmed | disputed) -> completed / failed.
@@ -689,7 +712,7 @@
       const times = players.map(p => best[p.id]?.[m.label]);
       const top = Math.min(...times.filter(Boolean).map(t => t.secs));
       return `<tr><th>${esc(m.label)}</th>${times.map((t, i) => t
-        ? `<td class="${t.secs === top ? "top" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)}${t.secs === top ? " · FASTEST" : ""}">${fmtTime(t.secs)}</td>`
+        ? `<td class="${t.secs === top ? "fastest" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)}${t.secs === top ? " · FASTEST" : ""}">${fmtTime(t.secs)}</td>`
         : `<td class="none">—</td>`).join("")}</tr>`;
     }).join("");
     $("#pbs").innerHTML = `
@@ -1046,6 +1069,16 @@
 
   // delete with double-click confirm
   $("#feed").addEventListener("click", async e => {
+    if (e.target.closest("[data-more]")) { state.feedLimit += 30; renderFeed(); return; }
+    const timeBtn = e.target.closest("[data-time]");
+    if (timeBtn) {
+      const a = state.activities.find(x => x.id === timeBtn.dataset.time);
+      state.timeEdit = { id: a.id, value: a.secs ? fmtTime(a.secs) : "" };
+      renderFeed();
+      $("#feed .time-input")?.focus();
+      return;
+    }
+    if (e.target.closest("[data-time-cancel]")) { state.timeEdit = null; renderFeed(); return; }
     const btn = e.target.closest(".del");
     if (!btn) return;
     if (!btn.classList.contains("armed")) {
@@ -1056,6 +1089,37 @@
     }
     try { await state.store.deleteActivity(btn.dataset.id); toast("DELETED"); }
     catch { toast("DELETE FAILED", "bad"); }
+  });
+
+  // keep what's typed if the feed re-renders mid-edit (someone else logs something)
+  $("#feed").addEventListener("input", e => {
+    if (e.target.classList.contains("time-input") && state.timeEdit) state.timeEdit.value = e.target.value;
+  });
+
+  // adding a time to an old activity; an empty box removes the time
+  $("#feed").addEventListener("submit", async e => {
+    const form = e.target.closest(".time-edit");
+    if (!form) return;
+    e.preventDefault();
+    const a = state.activities.find(x => x.id === form.dataset.id);
+    if (!a) return;
+    const raw = form.querySelector(".time-input").value.trim();
+    const secs = raw ? parseTime(raw) : null;
+    if (raw && !secs) { toast("USE MM:SS OR H:MM:SS", "bad"); return; }
+    const milestone = secs && milestoneFor(a.type, a.km);
+    const oldPB = milestone && personalBests(a.type)[a.playerId]?.[milestone.label];
+    form.querySelectorAll("button").forEach(b => { b.disabled = true; });
+    try {
+      await state.store.setActivityTime(a.id, secs);
+      state.timeEdit = null;
+      renderFeed();
+      toast(secs ? `TIME SAVED: ${fmtTime(secs)}` : "TIME REMOVED", "good");
+      if (milestone && (!oldPB || secs < oldPB.secs)) toast(`NEW PB! ${milestone.label} ${TYPES[a.type].label} ${fmtTime(secs)}`, "lvl");
+    } catch (err) {
+      console.error(err);
+      toast("COULDN'T SAVE THE TIME", "bad");
+      form.querySelectorAll("button").forEach(b => { b.disabled = false; });
+    }
   });
 
   // ---------- challenges ----------
