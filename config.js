@@ -30,6 +30,14 @@ window.APP_CONFIG = {
   // Adjusted km for each win at Golf with Friends (flat, no distance)
   golfWin: 1,
 
+  // Milestone distances for personal bests. An activity counts if its distance is
+  // within a couple of percent of the milestone (so a 5.08 km GPS run is still a 5K).
+  milestones: {
+    run:   [{ label: "1K", km: 1 }, { label: "5K", km: 5 }, { label: "10K", km: 10 }, { label: "HALF", km: 21.1 }, { label: "MARATHON", km: 42.2 }],
+    cycle: [{ label: "10K", km: 10 }, { label: "25K", km: 25 }, { label: "50K", km: 50 }, { label: "100K", km: 100 }],
+    swim:  [{ label: "400M", km: 0.4 }, { label: "1K", km: 1 }, { label: "1.5K", km: 1.5 }, { label: "3.8K", km: 3.8 }],
+  },
+
   // Adjusted km per level on the leaderboard
   kmPerLevel: 20,
 

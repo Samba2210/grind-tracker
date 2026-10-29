@@ -60,9 +60,14 @@
       <form id="logForm" autocomplete="off" hidden>
         <label class="field"><span>PLAYER</span><select id="fPlayer" required></select></label>
         <div class="field"><span>CLASS</span><div class="types" id="fTypes"></div></div>
-        <label class="field" id="distField"><span>DISTANCE (KM)</span>
-          <input id="fDist" type="number" step="0.01" min="0.01" max="1000" inputmode="decimal" placeholder="5.0" required>
-        </label>
+        <div class="row" id="distField">
+          <label class="field grow"><span>DISTANCE (KM)</span>
+            <input id="fDist" type="number" step="0.01" min="0.01" max="1000" inputmode="decimal" placeholder="5.0" required>
+          </label>
+          <label class="field grow"><span>TIME <em>(FOR PBs)</em></span>
+            <input id="fTime" maxlength="9" placeholder="30:12" autocomplete="off">
+          </label>
+        </div>
         <div class="row">
           <label class="field date-field"><span>DATE</span><input id="fDate" type="date" required></label>
           <label class="field grow"><span>NOTE <em>(OPTIONAL)</em></span><input id="fNote" maxlength="80" placeholder="Brutal hills"></label>
@@ -80,6 +85,7 @@
       </div>
       <div class="gate" id="betGate" hidden></div>
       <button class="btn primary big" id="chBtn" type="button" hidden>⚔ ISSUE A CHALLENGE</button>
+      <div id="pbs" class="pbs"></div>
       <div id="challenges" class="challenges"></div>
     </section>
 

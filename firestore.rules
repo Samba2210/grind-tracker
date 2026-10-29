@@ -130,6 +130,10 @@ service cloud.firestore {
     match /activities/{id} {
       allow read: if true;
       allow create: if isPlayer(request.resource.data.playerId)
+        && request.resource.data.keys().hasOnly(['playerId', 'type', 'km', 'date', 'note', 'createdAt', 'secs'])
+        // optional finish time in seconds, for PBs (up to 48 hours)
+        && (!('secs' in request.resource.data) || (request.resource.data.secs is number
+          && request.resource.data.secs > 0 && request.resource.data.secs <= 172800))
         && request.resource.data.playerId in players()
         && request.resource.data.type in ['run', 'cycle', 'swim', 'golf']
         && request.resource.data.km is number

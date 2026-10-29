@@ -7,6 +7,7 @@ A retro-arcade exercise tracker for 4 mates racing (virtually) from **Land's End
 - Leaderboard with levels, titles, XP bars and badges
 - Finish the route → LAP 2
 - Teams, and challenges: bet km that a mate can't hit a target. Winner takes the stake, and losers can go into debt
+- Add a finish time to an activity to set PBs at milestone distances (5K, 10K, half marathon…), shown on the PB board in the bets tab
 
 Tweak multipliers, player defaults and checkpoints in `config.js`.
 

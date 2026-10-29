@@ -68,6 +68,7 @@
     ready: false,
     claimDismissed: false,
     follow: ls.get("gbg-follow", null), // whose player the map camera follows
+    pbType: ls.get("gbg-pb", "run"),    // which sport the PB board shows
     store: null,
   };
 
@@ -82,6 +83,35 @@
     get member() { return this.local || !!this.me; },
     owns(playerId) { return this.admin || this.me === playerId; },
   };
+
+  // ---------- personal bests ----------
+  // "31", "30:12" or "1:02:45" -> seconds (a bare number is minutes); null if it doesn't parse
+  function parseTime(str) {
+    const s = String(str || "").trim();
+    if (!s) return null;
+    if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s) * 60) || null;
+    const m = s.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+    if (!m || +m[3] > 59 || (m[1] && +m[2] > 59)) return null;
+    return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]) || null;
+  }
+  const fmtTime = secs => {
+    const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60, s = Math.round(secs % 60);
+    return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+  };
+  const milestoneFor = (type, km) => (CFG.milestones?.[type] || []).find(m => km >= m.km * 0.98 && km <= m.km * 1.05);
+
+  // best time per player per milestone: { [playerId]: { [label]: { secs, date } } }
+  function personalBests(type) {
+    const best = {};
+    state.activities.forEach(a => {
+      if (a.type !== type || !(a.secs > 0)) return;
+      const m = milestoneFor(type, a.km);
+      if (!m) return;
+      const mine = best[a.playerId] = best[a.playerId] || {};
+      if (!mine[m.label] || a.secs < mine[m.label].secs) mine[m.label] = { secs: a.secs, date: a.date };
+    });
+    return best;
+  }
 
   const fmt = (km, dp = 1) => `${km.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })} KM`;
 
@@ -555,7 +585,7 @@
         <li class="feed-item" style="--c:${esc(p.color)}">
           ${avatarHTML(p, "sm")}
           <div class="feed-body">
-            <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb}${TYPES[a.type].flat ? "" : ` ${fmt(a.km)}`} ${TYPES[a.type].icon}
+            <div><b>${esc(p.name)}</b> ${TYPES[a.type].verb}${TYPES[a.type].flat ? "" : ` ${fmt(a.km)}`}${a.secs > 0 ? ` in <b class="time">${fmtTime(a.secs)}</b>` : ""} ${TYPES[a.type].icon}
               <span class="gain">+${points(a).toFixed(1)}</span></div>
             <div class="feed-meta">${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}${a.note ? ` · “${esc(a.note)}”` : ""}</div>
           </div>
@@ -648,6 +678,39 @@
       `<p class="empty">NO BETS ON THE TABLE. CALL SOMEONE OUT.</p>`;
   }
 
+  const PB_TYPES = Object.keys(TYPES).filter(t => CFG.milestones?.[t]?.length);
+  function renderPBs() {
+    if (!PB_TYPES.includes(state.pbType)) state.pbType = PB_TYPES[0];
+    const type = state.pbType;
+    if (!type) { $("#pbs").innerHTML = ""; return; }
+    const players = roster();
+    const best = personalBests(type);
+    const rows = CFG.milestones[type].map(m => {
+      const times = players.map(p => best[p.id]?.[m.label]);
+      const top = Math.min(...times.filter(Boolean).map(t => t.secs));
+      return `<tr><th>${esc(m.label)}</th>${times.map((t, i) => t
+        ? `<td class="${t.secs === top ? "top" : ""}" style="--c:${esc(players[i].color)}" title="${esc(players[i].name)} · ${shortDate(t.date)}${t.secs === top ? " · FASTEST" : ""}">${fmtTime(t.secs)}</td>`
+        : `<td class="none">—</td>`).join("")}</tr>`;
+    }).join("");
+    $("#pbs").innerHTML = `
+      <div class="pb-head"><h3>PB BOARD</h3>
+        <div class="pb-tabs">${PB_TYPES.map(t => `<button type="button" data-pb="${t}" class="${t === type ? "on" : ""}">${TYPES[t].icon} ${TYPES[t].label}</button>`).join("")}</div>
+      </div>
+      <table class="pb-table">
+        <thead><tr><th></th>${players.map(p => `<th title="${esc(p.name)}">${avatarHTML(p, "sm")}</th>`).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="pb-hint">Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Know their times before you bet.</p>`;
+  }
+
+  $("#pbs").addEventListener("click", e => {
+    const b = e.target.closest("[data-pb]");
+    if (!b) return;
+    state.pbType = b.dataset.pb;
+    ls.set("gbg-pb", state.pbType);
+    renderPBs();
+  });
+
   function renderRules() {
     $("#rules").innerHTML = `<h3>MULTIPLIERS</h3><div class="mults">` +
       Object.keys(TYPES).map(t => `<span>${TYPES[t].icon} ${TYPES[t].label} <b>${typeRate(t)}</b></span>`).join("") + `</div>`;
@@ -723,6 +786,7 @@
     renderBoard(stats);
     renderTrack(stats);
     renderChallenges();
+    renderPBs();
     renderFeed();
     renderPlayerSelect();
     renderAccess();
@@ -753,6 +817,8 @@
     const type = selectedType(), flat = !!TYPES[type].flat;
     $("#distField").hidden = flat;
     $("#fDist").required = !flat;
+    const t = $("#fTime").value.trim();
+    $("#fTime").setCustomValidity(t && !parseTime(t) ? "Use mm:ss or h:mm:ss" : "");
     const v = parseFloat($("#fDist").value);
     if (!flat && !(v > 0)) { $("#preview").textContent = ""; return; }
     $("#preview").textContent = `= +${fmt(points({ type, km: v }))} ADJUSTED`;
@@ -934,6 +1000,9 @@
       if (!TYPES[type].flat && !(v > 0)) return;
       const km = TYPES[type].flat ? 1 : Math.round(v * 1000) / 1000;
       const gained = points({ type, km });
+      const secs = TYPES[type].flat ? null : parseTime($("#fTime").value);
+      const milestone = secs && milestoneFor(type, km);
+      const oldPB = milestone && personalBests(type)[playerId]?.[milestone.label];
 
       const statsBefore = computeStats();
       const before = statsBefore.find(s => s.id === playerId);
@@ -946,9 +1015,11 @@
           date: $("#fDate").value || today(),
           note: $("#fNote").value.trim().slice(0, 80),
           createdAt: Date.now(),
+          ...(secs ? { secs } : {}),
         });
         ls.set("gbg-last-player", playerId);
         toast(`+${fmt(gained)} ${TYPES[type].icon}`, "good");
+        if (milestone && (!oldPB || secs < oldPB.secs)) toast(`NEW PB! ${milestone.label} ${TYPES[type].label} ${fmtTime(secs)}`, "lvl");
 
         const afterPts = before.pts + gained;
         if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1}`, "lvl");
@@ -961,6 +1032,7 @@
         const rival = teamsBefore.filter(t => t !== myTeam).reduce((m, t) => Math.max(m, t.pts), 0);
         if (myTeam && myTeam.pts <= rival && myTeam.pts + gained > rival) toast(`${myTeam.name} TAKES THE LEAD!`, "lvl");
         $("#fDist").value = "";
+        $("#fTime").value = "";
         $("#fNote").value = "";
         updatePreview();
       } catch (err) {
