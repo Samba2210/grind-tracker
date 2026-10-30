@@ -71,6 +71,9 @@
     pbType: ls.get("gbg-pb", "run"),    // which sport the PB board shows
     feedLimit: 30,                      // how many feed items to show ("SHOW MORE" adds more)
     timeEdit: null,                     // { id, value } while someone is adding a time to an old activity
+    lootFor: null,                      // whose crates the loot dialog shows
+    lootReveal: null,                   // the hat id just pulled from a crate, while it's on show
+    lootBusy: false,                    // a crate is mid-opening
     store: null,
   };
 
@@ -85,6 +88,51 @@
     get member() { return this.local || !!this.me; },
     owns(playerId) { return this.admin || this.me === playerId; },
   };
+
+  // ---------- loot crates & hats ----------
+  // Every level above 1 earns a loot crate. Opening one unlocks a random hat you don't have yet.
+  // The drop is seeded from the player and the crate number, so every screen agrees on who owns what
+  // and only the count of opened crates (plus the hat being worn) needs saving.
+  const RARITY = {
+    common:    { label: "COMMON",    weight: 10, color: "#b8b8d8" },
+    rare:      { label: "RARE",      weight: 5,  color: "#3d9bff" },
+    epic:      { label: "EPIC",      weight: 2,  color: "#c04dff" },
+    legendary: { label: "LEGENDARY", weight: 1,  color: "#ffb800" },
+  };
+  const HATS = [
+    { id: "cap",      icon: "🧢", name: "BASEBALL CAP",   rarity: "common" },
+    { id: "sunhat",   icon: "👒", name: "SUN HAT",        rarity: "common" },
+    { id: "bow",      icon: "🎀", name: "BIG BOW",        rarity: "common" },
+    { id: "helmet",   icon: "🪖", name: "TIN HELMET",     rarity: "common" },
+    { id: "rescue",   icon: "⛑️", name: "RESCUE HELMET",  rarity: "common" },
+    { id: "tophat",   icon: "🎩", name: "TOP HAT",        rarity: "rare" },
+    { id: "grad",     icon: "🎓", name: "MORTARBOARD",    rarity: "rare" },
+    { id: "pumpkin",  icon: "🎃", name: "PUMPKIN HEAD",   rarity: "rare" },
+    { id: "shroom",   icon: "🍄", name: "POWER MUSHROOM", rarity: "rare" },
+    { id: "frog",     icon: "🐸", name: "FROG FRIEND",    rarity: "epic" },
+    { id: "duck",     icon: "🦆", name: "DUCK",           rarity: "epic" },
+    { id: "cactus",   icon: "🌵", name: "CACTUS",         rarity: "epic" },
+    { id: "crown",    icon: "👑", name: "GOLD CROWN",     rarity: "legendary" },
+    { id: "unicorn",  icon: "🦄", name: "UNICORN",        rarity: "legendary" },
+    { id: "fire",     icon: "🔥", name: "ON FIRE",        rarity: "legendary" },
+  ];
+  const HAT = Object.fromEntries(HATS.map(h => [h.id, h]));
+  // string -> [0, 1)
+  const seeded = str => {
+    let h = 2166136261;
+    for (const ch of str) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 1000000) / 1000000;
+  };
+  // the hats unlocked by a player's first `opened` crates, in the order they came out
+  function hatsFor(playerId, opened) {
+    const owned = [];
+    for (let i = 0; i < opened && owned.length < HATS.length; i++) {
+      const pool = HATS.filter(h => !owned.includes(h.id));
+      let r = seeded(`${playerId}:${i}`) * pool.reduce((s, h) => s + RARITY[h.rarity].weight, 0);
+      owned.push((pool.find(h => (r -= RARITY[h.rarity].weight) < 0) || pool[pool.length - 1]).id);
+    }
+    return owned;
+  }
 
   // ---------- personal bests ----------
   // "31", "30:12" or "1:02:45" -> seconds (a bare number is minutes); null if it doesn't parse
@@ -266,7 +314,10 @@
     return CFG.players.map(p => {
       const o = state.players[p.id] || {};
       const team = teams[o.team] ? o.team : p.team;
-      return { ...p, name: o.name || p.name, color: o.color || p.color, avatar: safeImg(o.avatar), team, teamInfo: teams[team] };
+      const opened = Number.isInteger(o.opened) && o.opened > 0 ? o.opened : 0;
+      const hats = hatsFor(p.id, opened);
+      const hat = hats.includes(o.hat) ? o.hat : null;
+      return { ...p, name: o.name || p.name, color: o.color || p.color, avatar: safeImg(o.avatar), team, teamInfo: teams[team], opened, hats, hat };
     });
   }
 
@@ -314,6 +365,7 @@
       const next = CFG.route.checkpoints.find(c => c.km > pos);
       return {
         ...p, acts, raw, pts, bets, level, title, crowns: myCrowns, pbBonus,
+        crates: p.hats.length >= HATS.length ? 0 : Math.max(0, level - 1 - p.opened),
         debt: pts < 0,
         xp: (progress % CFG.kmPerLevel) / CFG.kmPerLevel,
         lap: Math.floor(progress / GOAL) + 1,
@@ -334,7 +386,8 @@
     const img = p.avatar
       ? `<img src="${p.avatar}" alt="">`
       : `<span>${esc((p.name || "?").trim().slice(0, 2).toUpperCase())}</span>`;
-    return `<span class="avatar ${cls}" style="--c:${esc(p.color)}">${img}</span>`;
+    const hat = HAT[p.hat];
+    return `<span class="avatar ${cls} ${hat ? "hatted" : ""}" style="--c:${esc(p.color)}">${img}${hat ? `<i class="hat" title="${hat.name}">${hat.icon}</i>` : ""}</span>`;
   }
 
   function renderBoard(stats) {
@@ -355,7 +408,7 @@
           <div class="rank">${i + 1}</div>
           ${avatarHTML(p, "lg")}
           <div class="info">
-            <div class="name">${esc(p.name)} ${teamChip(p.teamInfo)}<span class="lvl">LV ${p.level}</span><span class="ptitle">${p.title}</span>${p.lap > 1 ? `<span class="lapchip">LAP ${p.lap}</span>` : ""}${p.debt ? `<span class="debtchip">IN DEBT</span>` : ""}</div>
+            <div class="name">${esc(p.name)} ${teamChip(p.teamInfo)}<span class="lvl">LV ${p.level}</span><span class="ptitle">${p.title}</span>${p.lap > 1 ? `<span class="lapchip">LAP ${p.lap}</span>` : ""}${p.debt ? `<span class="debtchip">IN DEBT</span>` : ""}${p.crates ? `<span class="cratechip" title="Unopened loot crates">🎁 ${p.crates}</span>` : ""}</div>
             <div class="xp" title="${Math.round(p.xp * 100)}% to LV ${p.level + 1}"><i style="width:${(p.xp * 100).toFixed(1)}%"></i></div>
             <div class="meta">${raw}<span class="next">${nextTxt}</span></div>
             ${p.badges.length ? `<div class="badges">${p.badges.map(b => `<span class="badge" title="${esc(b.tip)}">${b.label}</span>`).join("")}</div>` : ""}
@@ -844,6 +897,14 @@
     authBtn.dataset.auth = state.user ? "out" : "in";
 
     $("#squadBtn").hidden = !access.member && !access.admin;
+    const lootBtn = $("#lootBtn");
+    lootBtn.hidden = !access.member;
+    const waiting = access.local
+      ? computeStats().reduce((s, p) => s + p.crates, 0)
+      : computeStats().find(p => p.id === access.me)?.crates || 0;
+    lootBtn.innerHTML = `🎁 LOOT${waiting ? `<span class="tab-badge">${waiting}</span>` : ""}`;
+    lootBtn.classList.toggle("ready", waiting > 0);
+    if ($("#lootDlg").open && !state.lootBusy) renderLoot();
     $("#squadBtn").textContent = access.admin ? "EDIT SQUAD" : "EDIT PROFILE";
 
     $("#logForm").hidden = !access.member;
@@ -855,6 +916,100 @@
       $("#betGate").innerHTML = gateHTML("MAKE AND TAKE BETS");
     }
   }
+
+  // ---------- loot dialog ----------
+  function lootPlayer() {
+    const stats = computeStats();
+    if (!access.local) return stats.find(p => p.id === access.me);
+    return stats.find(p => p.id === state.lootFor) || stats.find(p => p.crates) || stats[0];
+  }
+
+  function renderLoot() {
+    const reveal = HAT[state.lootReveal];
+    const p = lootPlayer();
+    if (!p) return;
+    state.lootFor = p.id;
+    const all = p.hats.length >= HATS.length;
+    const pick = access.local ? `
+      <div class="loot-who">${computeStats().map(s => `
+        <button type="button" data-loot-who="${esc(s.id)}" class="${s.id === p.id ? "on" : ""}" title="${esc(s.name)}">${avatarHTML(s, "sm")}${s.crates ? `<span class="tab-badge">${s.crates}</span>` : ""}</button>`).join("")}
+      </div>` : "";
+    const stage = reveal ? `
+      <div class="loot-reveal" style="--r:${RARITY[reveal.rarity].color}">
+        <div class="loot-burst"></div>
+        <div class="loot-hat">${reveal.icon}</div>
+        <div class="loot-rarity">${RARITY[reveal.rarity].label}</div>
+        <div class="loot-name">${reveal.name}</div>
+        <div class="loot-preview">${avatarHTML({ ...p, hat: reveal.id }, "lg")}<span>EQUIPPED!</span></div>
+        <button class="btn primary" type="button" data-loot-next>${p.crates ? `OPEN ANOTHER (${p.crates})` : "NICE"}</button>
+      </div>` : `
+      <div class="loot-crate ${p.crates ? "has" : ""}" id="lootCrate">
+        <div class="crate">📦</div>
+        <p>${all ? "YOU'VE COLLECTED EVERY HAT. LEGEND." : p.crates ? `${p.crates} CRATE${p.crates > 1 ? "S" : ""} TO OPEN` : `NO CRATES. HIT LV ${p.level + 1} FOR THE NEXT ONE`}</p>
+        ${p.crates ? `<button class="btn primary big" type="button" id="lootOpen">OPEN CRATE</button>` : ""}
+      </div>`;
+    const wardrobe = [{ id: null, icon: "✕", name: "NO HAT", rarity: "common" }, ...HATS].map(h => {
+      const owned = !h.id || p.hats.includes(h.id);
+      const on = (p.hat || null) === h.id;
+      return `<button type="button" class="wardrobe-hat ${owned ? "" : "locked"} ${on ? "on" : ""}" ${owned ? `data-wear="${h.id || ""}"` : "disabled"}
+        style="--r:${RARITY[h.rarity].color}" title="${owned ? `${h.name} · ${RARITY[h.rarity].label}` : `??? · ${RARITY[h.rarity].label}`}">
+        <span>${owned ? h.icon : "?"}</span><small>${owned ? h.name : RARITY[h.rarity].label}</small></button>`;
+    }).join("");
+    $("#lootBody").innerHTML = `${pick}${stage}
+      <h3 class="wardrobe-title">WARDROBE <small>${p.hats.length}/${HATS.length}</small></h3>
+      <div class="wardrobe">${wardrobe}</div>
+      <p class="ch-rules">Every level up earns a loot crate. Each crate unlocks a hat you don't have yet: rarer hats drop less often. Your hat shows on your icon everywhere, map included.</p>`;
+  }
+
+  function openLoot() {
+    state.lootFor = access.local ? state.lootFor : access.me;
+    state.lootReveal = null;
+    renderLoot();
+    $("#lootDlg").showModal();
+  }
+
+  $("#lootBtn").addEventListener("click", openLoot);
+  $("#lootClose").addEventListener("click", () => $("#lootDlg").close());
+  $("#lootBody").addEventListener("click", async e => {
+    const who = e.target.closest("[data-loot-who]");
+    if (who) { state.lootFor = who.dataset.lootWho; state.lootReveal = null; renderLoot(); return; }
+
+    const wear = e.target.closest("[data-wear]");
+    if (wear) {
+      const p = lootPlayer();
+      state.lootReveal = null;
+      try { await state.store.savePlayer(p.id, { hat: wear.dataset.wear }); renderLoot(); }
+      catch (err) { console.error(err); toast("COULDN'T CHANGE HAT", "bad"); }
+      return;
+    }
+
+    if (e.target.closest("#lootOpen")) {
+      const p = lootPlayer();
+      if (!p?.crates || state.lootBusy) return;
+      state.lootBusy = true;
+      e.target.closest("#lootOpen").disabled = true;
+      const hat = HAT[hatsFor(p.id, p.opened + 1)[p.opened]];
+      $("#lootCrate").classList.add("shaking");
+      try {
+        await Promise.all([
+          state.store.savePlayer(p.id, { opened: p.opened + 1, hat: hat.id }),
+          new Promise(r => setTimeout(r, 1100)),
+        ]);
+        state.lootBusy = false;
+        state.lootReveal = hat.id;
+        renderLoot();
+        toast(`${RARITY[hat.rarity].label} HAT: ${hat.icon} ${hat.name}`, hat.rarity === "legendary" ? "lvl" : "good");
+      } catch (err) {
+        console.error(err);
+        state.lootBusy = false;
+        toast("THE CRATE WOULDN'T OPEN", "bad");
+        renderLoot();
+      }
+      return;
+    }
+
+    if (e.target.closest("[data-loot-next]")) { state.lootReveal = null; renderLoot(); }
+  });
 
   function openClaim() {
     const free = roster().filter(p => !state.claims[p.id]);
@@ -1118,7 +1273,7 @@
         if (crown) toast(`♛ FASTEST ${pb.m.label}! +${PB_BONUS} KM`, "cp");
 
         const afterPts = before.pts + gained;
-        if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1}`, "lvl");
+        if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1} · 🎁 LOOT CRATE!`, "lvl");
         if (passedCheckpoints(afterPts) > passedCheckpoints(before.pts)) {
           const pos = afterPts % GOAL;
           const cp = [...CFG.route.checkpoints].reverse().find(c => c.km <= pos);

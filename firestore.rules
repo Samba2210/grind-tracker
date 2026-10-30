@@ -36,10 +36,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Player profiles (name, colour, small avatar image, team). Players edit their own; only the admin moves teams.
+    // Player profiles (name, colour, small avatar image, team, loot). Players edit their own; only the admin moves teams.
+    // `opened` counts loot crates opened (the hats are worked out from it in the app); `hat` is the one being worn.
     function validPlayer() {
       let d = request.resource.data;
-      return d.keys().hasOnly(['name', 'color', 'avatar', 'team'])
+      return d.keys().hasOnly(['name', 'color', 'avatar', 'team', 'hat', 'opened'])
+        && (!('hat' in d) || (d.hat is string && d.hat.size() <= 16))
+        && (!('opened' in d) || (d.opened is int && d.opened >= 0 && d.opened <= 500))
         && (!('team' in d) || d.team in ['t1', 't2'])
         && (!('name' in d) || (d.name is string && d.name.size() <= 16))
         && (!('color' in d) || (d.color is string && d.color.size() <= 9))
@@ -48,9 +51,13 @@ service cloud.firestore {
     match /players/{id} {
       allow read: if true;
       allow create: if id in players() && validPlayer()
-        && (isAdmin() || (isPlayer(id) && !('team' in request.resource.data)));
+        && (isAdmin() || (isPlayer(id) && !('team' in request.resource.data)
+          && request.resource.data.get('opened', 0) <= 1));
+      // crates open one at a time
       allow update: if validPlayer()
-        && (isAdmin() || (isPlayer(id) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'avatar'])));
+        && (isAdmin() || (isPlayer(id)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'color', 'avatar', 'hat', 'opened'])
+          && request.resource.data.get('opened', 0) - resource.data.get('opened', 0) in [0, 1]));
     }
 
     // Teams (name, colour): admin only

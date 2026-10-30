@@ -206,6 +206,15 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
   image-rendering: auto;
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* hats sit on top of the icon, so a hatted avatar can't clip its overflow */
+.avatar.hatted { overflow: visible; position: relative; }
+.avatar.hatted img { position: absolute; inset: 0; }
+.avatar .hat {
+  position: absolute; left: 50%; bottom: 76%; translate: -50% 0; rotate: -8deg;
+  font-style: normal; font-size: calc(var(--s) * .56); line-height: 1; pointer-events: none;
+  filter: drop-shadow(0 2px 0 rgba(0,0,0,.6));
+}
+.marker .avatar.hatted { margin-top: 18px; }
 .avatar.sm { --s: 32px; border-width: 2px; }
 .avatar.lg { --s: 48px; }
 .avatar.xl { --s: 96px; }
@@ -235,6 +244,7 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .badge { font-size: 7px; padding: 4px 5px; border: 1px solid var(--lime); color: var(--lime); cursor: help; }
 .score { font-size: 15px; text-align: right; color: #fff; text-shadow: 0 0 10px var(--c); }
 .score.neg { color: var(--red); text-shadow: 0 0 10px var(--red); }
+.cratechip { font-family: var(--pixel); font-size: 8px; padding: 3px 5px; border: 1px solid var(--amber); color: var(--amber); animation: blink 1.4s steps(2) infinite; }
 .debtchip { font-family: var(--pixel); font-size: 8px; padding: 4px 5px; background: var(--red); color: #fff; animation: blink 1.4s steps(2) infinite; }
 .score small { display: block; font-size: 8px; color: var(--dim); margin-top: 4px; text-shadow: none; }
 
@@ -310,6 +320,41 @@ body[data-tab="feed"] [data-panel="feed"] { display: block; }
 .ch-rules b { color: var(--amber); }
 .dlg-narrow { width: min(520px, calc(100vw - 32px)); }
 .dlg-narrow form { display: grid; gap: 14px; }
+
+/* ---------- loot ---------- */
+.loot-btn { position: relative; }
+.loot-btn .tab-badge { position: absolute; top: -8px; right: -8px; }
+.loot-btn.ready { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 14px rgba(255,184,0,.45); }
+.loot-who { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; }
+.loot-who button { position: relative; padding: 0; background: none; border: 2px solid transparent; cursor: pointer; opacity: .6; }
+.loot-who button.on { border-color: #fff; opacity: 1; }
+.loot-who .tab-badge { position: absolute; top: -8px; right: -8px; }
+.loot-crate, .loot-reveal { display: grid; justify-items: center; gap: 10px; padding: 26px 12px 18px; text-align: center; background: radial-gradient(circle at 50% 40%, rgba(255,184,0,.12), transparent 65%); border: 2px solid var(--line); }
+.loot-crate .crate { font-size: 64px; line-height: 1; filter: grayscale(.8) brightness(.6); }
+.loot-crate.has .crate { filter: drop-shadow(0 0 16px rgba(255,184,0,.6)); animation: idle 1.6s ease-in-out infinite; }
+.loot-crate.shaking .crate { animation: crate-shake .12s linear infinite; }
+.loot-crate p { margin: 0; font-family: var(--pixel); font-size: 9px; color: var(--amber); line-height: 1.6; }
+@keyframes crate-shake { 25% { translate: -4px 0; rotate: -6deg; } 75% { translate: 4px 0; rotate: 6deg; } }
+.loot-reveal { position: relative; overflow: hidden; border-color: var(--r); }
+.loot-burst { position: absolute; inset: -50%; background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--r) 30%, transparent) 0 10deg, transparent 10deg 20deg); animation: spin 8s linear infinite; }
+@keyframes spin { to { rotate: 360deg; } }
+.loot-reveal > :not(.loot-burst) { position: relative; }
+.loot-hat { font-size: 72px; line-height: 1; animation: pop .5s cubic-bezier(.3,1.6,.5,1) both; filter: drop-shadow(0 0 18px var(--r)); }
+@keyframes pop { from { scale: 0; rotate: -30deg; } }
+.loot-rarity { font-family: var(--pixel); font-size: 9px; color: #000; background: var(--r); padding: 4px 8px; }
+.loot-name { font-family: var(--pixel); font-size: 12px; color: var(--r); text-shadow: 0 0 10px var(--r); }
+.loot-preview { display: flex; align-items: center; gap: 12px; margin-top: 18px; font-family: var(--pixel); font-size: 8px; color: var(--lime); }
+.wardrobe-title { margin: 18px 0 8px; font-size: 10px; color: var(--cyan); }
+.wardrobe-title small { color: var(--dim); font-size: 8px; margin-left: 6px; }
+.wardrobe { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+.wardrobe-hat { display: grid; justify-items: center; gap: 4px; padding: 8px 4px; cursor: pointer; background: rgba(0,0,0,.35); color: var(--text); border: 2px solid color-mix(in srgb, var(--r) 45%, transparent); }
+.wardrobe-hat span { font-size: 26px; line-height: 1; }
+.wardrobe-hat small { font-family: var(--pixel); font-size: 6px; line-height: 1.4; color: var(--r); text-align: center; }
+.wardrobe-hat:hover:not(:disabled) { border-color: var(--r); }
+.wardrobe-hat.on { border-color: #fff; background: color-mix(in srgb, var(--r) 22%, #000); }
+.wardrobe-hat.locked { cursor: default; opacity: .45; }
+.wardrobe-hat.locked span { font-family: var(--pixel); font-size: 18px; color: var(--dim); }
+@media (prefers-reduced-motion: reduce) { .loot-crate.has .crate, .loot-burst, .loot-hat { animation: none; } }
 .challenges .empty { margin: 0; }
 .meta .up { color: var(--lime); }
 .meta .down { color: var(--red); }

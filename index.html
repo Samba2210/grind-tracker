@@ -21,6 +21,7 @@
     <div class="top-actions">
       <span id="mode" class="pill">CONNECTING…</span>
       <button id="role" class="pill role" type="button" hidden></button>
+      <button id="lootBtn" class="btn ghost loot-btn" type="button" hidden>🎁 LOOT</button>
       <button id="squadBtn" class="btn ghost" type="button" hidden>EDIT SQUAD</button>
       <button id="authBtn" class="btn primary" type="button" hidden>SIGN IN</button>
     </div>
@@ -138,6 +139,13 @@
       <p class="ch-rules" id="chRules">If they do it, <b>they win</b> the stake from you. If they fail, <b>you win</b> it from them. They have to accept first. No limits: losing can put you in debt.</p>
       <button class="btn primary big" id="chSubmit" type="submit">⚔ SEND CHALLENGE</button>
     </form>
+  </dialog>
+
+  <dialog id="lootDlg" class="dlg dlg-narrow">
+    <div class="dlg-inner">
+      <div class="panel-head"><h2>🎁 LOOT CRATES</h2><button class="btn ghost" id="lootClose" type="button">✕</button></div>
+      <div id="lootBody"></div>
+    </div>
   </dialog>
 
   <dialog id="claimDlg" class="dlg dlg-narrow">
