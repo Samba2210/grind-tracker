@@ -148,13 +148,16 @@
     const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60, s = Math.round(secs % 60);
     return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
   };
-  const milestoneFor = (type, km) => (CFG.milestones?.[type] || []).find(m => km >= m.km * 0.98 && km <= m.km * 1.05);
-
-  // A time over a distance near a milestone, projected to the exact milestone distance with
-  // Riegel's formula (t2 = t1 × (d2/d1)^1.06), so a 5.08 km run and a 4.95 km run compare fairly as 5Ks.
-  function milestoneTime(type, km, secs) {
-    const m = secs > 0 && milestoneFor(type, km);
-    return m ? { m, secs: Math.round(secs * Math.pow(m.km / km, 1.06)) } : null;
+  // Every milestone a timed activity counts for, with its time projected to that exact distance:
+  //  - at or past the milestone: the time at the same average pace (a 12 km run in 60:00 is a 50:00 10K)
+  //  - just short of it (within 2%): scaled up with Riegel's formula, t2 = t1 × (d2/d1)^1.06,
+  //    so a GPS-short 4.95 km run still counts as a 5K without being let off lightly
+  function milestoneTimes(type, km, secs) {
+    if (!(secs > 0) || !(km > 0)) return [];
+    return (CFG.milestones?.[type] || []).flatMap(m =>
+      km >= m.km ? [{ m, secs: Math.round(secs * m.km / km) }]
+      : km >= m.km * 0.98 ? [{ m, secs: Math.round(secs * Math.pow(m.km / km, 1.06)) }]
+      : []);
   }
 
   // best time per player per milestone: { [playerId]: { [label]: { secs, raw, km, date } } }
@@ -162,10 +165,10 @@
     const best = {};
     state.activities.forEach(a => {
       if (a.type !== type) return;
-      const t = milestoneTime(type, a.km, a.secs);
-      if (!t) return;
-      const mine = best[a.playerId] = best[a.playerId] || {};
-      if (!mine[t.m.label] || t.secs < mine[t.m.label].secs) mine[t.m.label] = { secs: t.secs, raw: a.secs, km: a.km, date: a.date };
+      milestoneTimes(type, a.km, a.secs).forEach(t => {
+        const mine = best[a.playerId] = best[a.playerId] || {};
+        if (!mine[t.m.label] || t.secs < mine[t.m.label].secs) mine[t.m.label] = { secs: t.secs, raw: a.secs, km: a.km, date: a.date };
+      });
     });
     return best;
   }
@@ -196,6 +199,11 @@
     const others = Object.entries(personalBests(type)).filter(([id, b]) => id !== playerId && b[t.m.label]);
     return others.length + 1 >= PB_MIN && others.every(([, b]) => t.secs < b[t.m.label].secs);
   };
+
+  function pbToasts(type, newPBs, crowns) {
+    if (newPBs.length) toast(`NEW PB! ${TYPES[type].label} ${newPBs.map(t => `${t.m.label} ${fmtTime(t.secs)}`).join(" · ")}`, "lvl");
+    if (crowns.length) toast(`♛ FASTEST ${crowns.map(t => t.m.label).join(" + ")}! +${crowns.length * PB_BONUS} KM`, "cp");
+  }
 
   const isNewPB = (type, playerId, t) => {
     const old = t && personalBests(type)[playerId]?.[t.m.label];
@@ -680,8 +688,11 @@
 
   // "≈ 5K 24:52" when a timed activity was near (but not exactly) a milestone distance
   const scaledNote = a => {
-    const t = !TYPES[a.type].flat && milestoneTime(a.type, a.km, a.secs);
-    return t && t.secs !== a.secs ? ` <span class="scaled" title="Projected to exactly ${esc(t.m.label)} for the PB board">≈ ${esc(t.m.label)} ${fmtTime(t.secs)}</span>` : "";
+    const ts = TYPES[a.type].flat ? [] : milestoneTimes(a.type, a.km, a.secs).filter(t => t.secs !== a.secs);
+    if (!ts.length) return "";
+    const top = ts[ts.length - 1];
+    const all = ts.map(t => `${t.m.label} ${fmtTime(t.secs)}`).join(" · ");
+    return ` <span class="scaled" title="Counts on the PB board as: ${esc(all)}">≈ ${esc(top.m.label)} ${fmtTime(top.secs)}${ts.length > 1 ? ` +${ts.length - 1}` : ""}</span>`;
   };
 
   function renderFeed() {
@@ -847,7 +858,7 @@
         <thead><tr><th></th>${players.map(p => `<th title="${esc(p.name)}">${avatarHTML(p, "sm")}</th>`).join("")}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="pb-hint"><b class="pb-bonus">♛ FASTEST IN EACH EVENT EARNS +${PB_BONUS} KM</b>${PB_MIN > 1 ? ` (once ${PB_MIN}+ players have a time)` : ""}. Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Distances close to a milestone are scaled to it.</p>`;
+      <p class="pb-hint"><b class="pb-bonus">♛ FASTEST IN EACH EVENT EARNS +${PB_BONUS} KM</b>${PB_MIN > 1 ? ` (once ${PB_MIN}+ players have a time)` : ""}. Add a time when you log a ${TYPES[type].label.toLowerCase()} to set a PB. Longer efforts count for every shorter milestone at the same pace, and ones just short are scaled up.</p>`;
   }
 
   $("#pbs").addEventListener("click", e => {
@@ -1250,9 +1261,9 @@
       const km = TYPES[type].flat ? 1 : Math.round(v * 1000) / 1000;
       const gained = points({ type, km });
       const secs = TYPES[type].flat ? null : parseTime($("#fTime").value);
-      const pb = milestoneTime(type, km, secs);
-      const newPB = isNewPB(type, playerId, pb);
-      const crown = takesCrown(type, playerId, pb);
+      const pbs = milestoneTimes(type, km, secs);
+      const newPBs = pbs.filter(t => isNewPB(type, playerId, t));
+      const crowns = pbs.filter(t => takesCrown(type, playerId, t));
 
       const statsBefore = computeStats();
       const before = statsBefore.find(s => s.id === playerId);
@@ -1269,8 +1280,7 @@
         });
         ls.set("gbg-last-player", playerId);
         toast(`+${fmt(gained)} ${TYPES[type].icon}`, "good");
-        if (newPB) toast(`NEW PB! ${pb.m.label} ${TYPES[type].label} ${fmtTime(pb.secs)}`, "lvl");
-        if (crown) toast(`♛ FASTEST ${pb.m.label}! +${PB_BONUS} KM`, "cp");
+        pbToasts(type, newPBs, crowns);
 
         const afterPts = before.pts + gained;
         if (Math.floor(afterPts / CFG.kmPerLevel) + 1 > before.level) toast(`LEVEL UP! LV ${Math.floor(afterPts / CFG.kmPerLevel) + 1} · 🎁 LOOT CRATE!`, "lvl");
@@ -1334,17 +1344,16 @@
     const raw = form.querySelector(".time-input").value.trim();
     const secs = raw ? parseTime(raw) : null;
     if (raw && !secs) { toast("USE MM:SS OR H:MM:SS", "bad"); return; }
-    const pb = milestoneTime(a.type, a.km, secs);
-    const newPB = isNewPB(a.type, a.playerId, pb);
-    const crown = takesCrown(a.type, a.playerId, pb);
+    const pbs = milestoneTimes(a.type, a.km, secs);
+    const newPBs = pbs.filter(t => isNewPB(a.type, a.playerId, t));
+    const crowns = pbs.filter(t => takesCrown(a.type, a.playerId, t));
     form.querySelectorAll("button").forEach(b => { b.disabled = true; });
     try {
       await state.store.setActivityTime(a.id, secs);
       state.timeEdit = null;
       renderFeed();
       toast(secs ? `TIME SAVED: ${fmtTime(secs)}` : "TIME REMOVED", "good");
-      if (newPB) toast(`NEW PB! ${pb.m.label} ${TYPES[a.type].label} ${fmtTime(pb.secs)}`, "lvl");
-      if (crown) toast(`♛ FASTEST ${pb.m.label}! +${PB_BONUS} KM`, "cp");
+      pbToasts(a.type, newPBs, crowns);
     } catch (err) {
       console.error(err);
       toast("COULDN'T SAVE THE TIME", "bad");
